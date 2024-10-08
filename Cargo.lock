@@ -50,7 +50,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "ais_generic"
+name = "ais_fe518f53"
 version = "1.0.0"
 dependencies = [
  "artisan_middleware",

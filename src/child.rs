@@ -19,7 +19,7 @@ pub async fn create_child(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .env("NODE_ENV", "production") // Set NODE_ENV=production
-        .env("PORT", "3000"); // Set PORT=3000
+        .env("PORT", "9500"); // Set PORT=3000
 
     // Set the process to start a new process group
     unsafe {

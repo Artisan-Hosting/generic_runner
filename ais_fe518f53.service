@@ -4,14 +4,14 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/ais_generic
-WorkingDirectory=/etc/ais_generic
+ExecStart=/usr/local/bin/ais_fe518f53
+WorkingDirectory=/etc/ais_fe518f53
 Restart=on-failure
 RestartSec=5
 User=root
 Environment="RUST_LOG=info"
-StandardOutput=file:/var/log/ais_runner.log
-StandardError=file:/var/log/ais_runner_error.log
+StandardOutput=file:/var/log/ais_fe518f53.log
+StandardError=file:/var/log/ais_fe518f53_error.log
 
 [Install]
 WantedBy=multi-user.target
