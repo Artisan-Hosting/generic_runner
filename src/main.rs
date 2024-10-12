@@ -16,7 +16,7 @@ use dusa_collection_utils::{
 };
 use monitor::monitor_directory;
 use nix::libc::{killpg, SIGKILL};
-use signals::sighup_watch;
+use signals::{sighup_watch, sigusr_watch};
 use std::{
     io,
     sync::{
@@ -95,7 +95,10 @@ async fn main() {
 
     // Listening for the sighup
     let reload: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
+    let exit_graceful: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
+
     sighup_watch(reload.clone());
+    sigusr_watch(exit_graceful.clone());
 
     log!(LogLevel::Trace, "Setting state as active...");
     state.is_active = true;
@@ -399,6 +402,84 @@ async fn main() {
             }
 
             reload.store(false, Ordering::Relaxed);
+        }
+
+        if exit_graceful.load(Ordering::Relaxed) {
+            log!(LogLevel::Debug, "Exiting gracefully");
+            if let Ok(mut child) = child
+                .try_write_with_timeout(Some(Duration::from_secs(10)))
+                .await
+            {
+                if let Some(pid) = child.id() {
+                    log!(
+                        LogLevel::Trace,
+                        "Attempting to kill child process with ID: {}",
+                        pid
+                    );
+
+                    // Kill the entire process group
+                    unsafe {
+                        let pgid = pid; // Since we set pgid to pid in pre_exec
+                        if killpg(pgid as i32, SIGKILL) == -1 {
+                            // apperently in C -1 is the errono ?
+                            let err = io::Error::last_os_error();
+                            log!(
+                                LogLevel::Error,
+                                "Failed to kill child process group: {}",
+                                err
+                            );
+                            let error = ErrorArrayItem::new(Errors::GeneralError, err.to_string());
+                            log_error(&mut state, error, &state_path);
+                            wind_down_state(&mut state, &state_path);
+                            std::process::exit(1);
+                        }
+                    }
+
+                    // Wait for the child to be fully terminated
+                    match child.wait().await {
+                        Ok(status) => {
+                            log!(
+                                LogLevel::Trace,
+                                "Child process terminated with status: {:?}",
+                                status
+                            );
+
+                            // Setting the state te reflect exit
+                            state.is_active = false;
+                            state.data = String::from("Exited");
+                            state.last_updated = current_timestamp();
+                            state.event_counter += 1;
+                            update_state(&mut state, &state_path);
+
+                            // exit with 0 status
+                            std::process::exit(0)
+                        }
+                        Err(err) => {
+                            let msg =
+                                format!("Failed to wait for child process termination: {}", err);
+                            log!(LogLevel::Error, "{}", msg);
+                            let error: ErrorArrayItem = ErrorArrayItem::new(Errors::GeneralError, msg);
+                            log_error(&mut state, error, &state_path);
+                            wind_down_state(&mut state, &state_path);
+                            std::process::exit(1)
+                        }
+                    }
+                } else {
+                    let msg = "Child process ID not available during kill attempt";
+                    log!(LogLevel::Error, "{}", msg);
+                    let error: ErrorArrayItem = ErrorArrayItem::new(Errors::GeneralError, msg.to_string());
+                    log_error(&mut state, error, &state_path);
+                    wind_down_state(&mut state, &state_path);
+                    std::process::exit(1)
+                }
+            } else {
+                let msg = "Error acquiring write lock for child process";
+                log!(LogLevel::Error, "{}", msg);
+                let error: ErrorArrayItem = ErrorArrayItem::new(Errors::GeneralError, msg.to_string());
+                log_error(&mut state, error, &state_path);
+                wind_down_state(&mut state, &state_path);
+                std::process::exit(1)
+            }
         }
     }
 }
