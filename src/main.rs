@@ -8,7 +8,7 @@ use artisan_middleware::{
     timestamp::current_timestamp,
 };
 use child::{create_child, run_one_shot_process};
-use config::{get_config, specific_config,  wind_down_state};
+use config::{get_config, specific_config, wind_down_state};
 use dusa_collection_utils::{
     errors::{ErrorArrayItem, Errors},
     rwarc::LockWithTimeout,
@@ -16,17 +16,26 @@ use dusa_collection_utils::{
 };
 use monitor::monitor_directory;
 use nix::libc::{killpg, SIGKILL};
-use std::{io, time::Duration};
+use signals::sighup_watch;
+use std::{
+    io,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
 
 mod child;
 mod config;
 mod monitor;
+mod signals;
 
 #[tokio::main]
 async fn main() {
     // Initialization
     log!(LogLevel::Trace, "Initializing application...");
-    let config: AppConfig = get_config();
+    let mut config: AppConfig = get_config();
     let state_path: PathType = StatePersistence::get_state_path(&config);
 
     log!(LogLevel::Trace, "Loading specific configuration...");
@@ -83,6 +92,10 @@ async fn main() {
             state
         }
     };
+
+    // Listening for the sighup
+    let reload: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
+    sighup_watch(reload.clone());
 
     log!(LogLevel::Trace, "Setting state as active...");
     state.is_active = true;
@@ -266,6 +279,126 @@ async fn main() {
                 state.data = String::from("Nominal");
                 update_state(&mut state, &state_path);
             }
+        }
+
+        if reload.load(Ordering::Relaxed) {
+            log!(LogLevel::Debug, "Reloading");
+
+            // reload config file
+            config = get_config();
+
+            // Updating state data
+            state = match StatePersistence::load_state(&state_path) {
+                Ok(mut loaded_data) => {
+                    log!(LogLevel::Info, "Reloading state data");
+                    loaded_data.is_active = true;
+                    loaded_data.data = String::from("Reloading");
+                    loaded_data.config.debug_mode = config.debug_mode;
+                    loaded_data.last_updated = current_timestamp();
+                    loaded_data.config.log_level = config.log_level;
+                    set_log_level(loaded_data.config.log_level);
+                    loaded_data.error_log.clear();
+                    update_state(&mut loaded_data, &state_path);
+                    loaded_data
+                }
+                Err(e) => {
+                    log!(LogLevel::Warn, "No previous state loaded, creating new one");
+                    log!(LogLevel::Debug, "Error loading previous state: {}", e);
+                    let mut state = AppState {
+                        data: String::new(),
+                        last_updated: current_timestamp(),
+                        event_counter: 0,
+                        is_active: false,
+                        error_log: vec![],
+                        config: config.clone(),
+                    };
+                    state.is_active = false;
+                    state.data = String::from("Initializing");
+                    state.config.debug_mode = config.debug_mode;
+                    state.last_updated = current_timestamp();
+                    state.config.log_level = config.log_level;
+                    set_log_level(state.config.log_level);
+                    state.error_log.clear();
+                    update_state(&mut state, &state_path);
+
+                    state
+                }
+            };
+
+            // Killing and redrawing the process
+            // Acquire a write lock to modify the child process
+            if let Ok(mut child) = child.try_write_with_timeout(None).await {
+                if let Some(pid) = child.id() {
+                    log!(
+                        LogLevel::Trace,
+                        "Attempting to kill child process with ID: {}",
+                        pid
+                    );
+
+                    // Kill the entire process group
+                    unsafe {
+                        let pgid = pid; // Since we set pgid to pid in pre_exec
+                        if killpg(pgid as i32, SIGKILL) == -1 {
+                            // apperently in C -1 is the errono ?
+                            let err = io::Error::last_os_error();
+                            log!(
+                                LogLevel::Error,
+                                "Failed to kill child process group: {}",
+                                err
+                            );
+                            let error = ErrorArrayItem::new(Errors::GeneralError, err.to_string());
+                            log_error(&mut state, error, &state_path);
+                            continue;
+                        }
+                    }
+
+                    // Wait for the child to be fully terminated
+                    match child.wait().await {
+                        Ok(status) => {
+                            log!(
+                                LogLevel::Trace,
+                                "Child process terminated with status: {:?}",
+                                status
+                            );
+
+                            log!(LogLevel::Trace, "Running one shot before re-creating child");
+                            // Run the one-shot process before creating the child
+                            if let Err(err) = run_one_shot_process(&settings).await {
+                                log!(LogLevel::Error, "One-shot process failed: {}", err);
+                                let error = ErrorArrayItem::new(Errors::GeneralError, err);
+                                log_error(&mut state, error, &state_path);
+                                return;
+                            }
+                            log!(LogLevel::Info, "One shot finished, Spawning new child");
+
+                            *child = create_child(&mut state, &state_path, &settings).await;
+                            log!(LogLevel::Info, "New child process spawned.");
+                        }
+                        Err(err) => {
+                            log!(
+                                LogLevel::Error,
+                                "Failed to wait for child process termination: {}",
+                                err
+                            );
+                            let error = ErrorArrayItem::new(Errors::GeneralError, err.to_string());
+                            log_error(&mut state, error, &state_path);
+                        }
+                    }
+                } else {
+                    log!(
+                        LogLevel::Error,
+                        "Child process ID not available during kill attempt"
+                    );
+                }
+            } else {
+                log!(
+                    LogLevel::Error,
+                    "Error acquiring write lock for child process"
+                );
+                continue;
+            }
+
+            reload.store(false, Ordering::Relaxed);
         }
     }
 }
