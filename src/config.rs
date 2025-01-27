@@ -1,10 +1,15 @@
 use artisan_middleware::{
-    common::update_state, config::AppConfig, log, logger::LogLevel, state_persistence::AppState, timestamp::current_timestamp
+    aggregator::Status, common::update_state, config::AppConfig, dusa_collection_utils::{
+        self,
+        stringy::Stringy,
+        version::{SoftwareVersion, Version, VersionCode},
+    }, state_persistence::{AppState, StatePersistence}, timestamp::current_timestamp, version::{aml_version, str_to_version}
 };
 use colored::Colorize;
 use config::{Config, ConfigError, File};
 use dusa_collection_utils::{
-    errors::{ErrorArrayItem, Errors},
+    log,
+    log::{LogLevel, set_log_level},
     types::PathType,
 };
 use serde::Deserialize;
@@ -15,27 +20,87 @@ pub fn get_config() -> AppConfig {
         Ok(loaded_data) => loaded_data,
         Err(e) => {
             log!(LogLevel::Error, "Couldn't load config: {}", e.to_string());
-            std::process::exit(0)
+            std::process::exit(100)
         }
     };
-    config.app_name = env!("CARGO_PKG_NAME").to_string();
-    config.version = env!("CARGO_PKG_VERSION").to_string();
+    config.app_name = Stringy::from(env!("CARGO_PKG_NAME").to_string());
+
+    let raw_version: SoftwareVersion = {
+        // defining the version
+        let library_version: Version = aml_version();
+        let software_version: Version =
+            str_to_version(env!("CARGO_PKG_VERSION"), Some(VersionCode::Production));
+
+        SoftwareVersion {
+            application: software_version,
+            library: library_version,
+        }
+    };
+
+    config.version = match serde_json::to_string(&raw_version) {
+        Ok(ver) => ver,
+        Err(err) => {
+            log!(LogLevel::Error, "{}", err);
+            std::process::exit(100);
+        }
+    };
+
     config.database = None;
-    config.aggregator = None;
-    config.git = None;
     config
 }
 
-pub fn wind_down_state(state: &mut AppState, state_path: &PathType) {
-    state.is_active = false;
-    state.data = String::from("Terminated");
-    state.last_updated = current_timestamp();
-    state.error_log.push(ErrorArrayItem::new(
-        Errors::GeneralError,
-        "Wind down requested check logs".to_owned(),
-    ));
-    update_state(state, &state_path);
+pub async fn generate_application_state(state_path: &PathType, config: &AppConfig) -> AppState {
+    match StatePersistence::load_state(&state_path).await {
+        Ok(mut loaded_data) => {
+            log!(LogLevel::Info, "Loaded previous state data");
+            log!(LogLevel::Trace, "Previous state data: {:#?}", loaded_data);
+            loaded_data.data = String::from("Initializing");
+            loaded_data.config.debug_mode = config.debug_mode;
+            loaded_data.last_updated = current_timestamp();
+            loaded_data.config.log_level = config.log_level;
+            loaded_data.status = Status::Starting;
+            set_log_level(loaded_data.config.log_level);
+            loaded_data.error_log.clear();
+            update_state(&mut loaded_data, &state_path, None).await;
+            loaded_data
+        }
+        Err(e) => {
+            log!(LogLevel::Warn, "No previous state loaded, creating new one");
+            log!(LogLevel::Debug, "Error loading previous state: {}", e);
+            let mut state = AppState {
+                data: String::new(),
+                last_updated: current_timestamp(),
+                event_counter: 0,
+                error_log: vec![],
+                config: config.clone(),
+                name: config.app_name.to_string(),
+                version: {
+                    // defining the version
+                    let library_version: Version = aml_version();
+                    let software_version: Version =
+                        str_to_version(env!("CARGO_PKG_VERSION"), Some(VersionCode::Production));
+            
+                    SoftwareVersion {
+                        application: software_version,
+                        library: library_version,
+                    }
+                },
+                system_application: false,
+                status: Status::Starting,
+            };
+            state.data = String::from("Initializing");
+            state.config.debug_mode = config.debug_mode;
+            state.last_updated = current_timestamp();
+            state.config.log_level = config.log_level;
+            set_log_level(state.config.log_level);
+            state.error_log.clear();
+            update_state(&mut state, &state_path, None).await;
+
+            state
+        }
+    }
 }
+
 
 pub fn specific_config() -> Result<AppSpecificConfig, ConfigError> {
     let mut builder = Config::builder();
