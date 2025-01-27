@@ -59,6 +59,7 @@ pub async fn generate_application_state(state_path: &PathType, config: &AppConfi
             loaded_data.last_updated = current_timestamp();
             loaded_data.config.log_level = config.log_level;
             loaded_data.status = Status::Starting;
+            loaded_data.pid = std::process::id();
             set_log_level(loaded_data.config.log_level);
             loaded_data.error_log.clear();
             update_state(&mut loaded_data, &state_path, None).await;
@@ -74,6 +75,7 @@ pub async fn generate_application_state(state_path: &PathType, config: &AppConfi
                 error_log: vec![],
                 config: config.clone(),
                 name: config.app_name.to_string(),
+                pid: std::process::id(),
                 version: {
                     // defining the version
                     let library_version: Version = aml_version();

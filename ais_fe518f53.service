@@ -4,11 +4,16 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/ais_fe518f53
+KillMode=process
+Environment="NVM_DIR=/var/www/.nvm"
+Environment="PATH=/var/www/.nvm/versions/node/v23.5.0/bin:/usr/local/bin:/usr/bin:/bin"
+ExecStart=/opt/artisan/bin/ais_fe518f53
 WorkingDirectory=/etc/ais_fe518f53
+ExecReload=/bin/kill -SIGHUP $MAINPID
+KillSignal=SIGUSR1
 Restart=on-failure
 RestartSec=5
-User=root
+User=www-data
 Environment="RUST_LOG=info"
 StandardOutput=file:/var/log/ais_fe518f53.log
 StandardError=file:/var/log/ais_fe518f53_error.log
