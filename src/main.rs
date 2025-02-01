@@ -103,13 +103,13 @@ async fn main() {
             let xid: u32 = child.clone().await.get_pid().await.unwrap();
             log!(LogLevel::Info, "Child spawned: {}", xid);
             state.data = format!("Child spawned: {}", xid);
-            state.status = Status::Building;
+            state.status = Status::Running;
             update_state(&mut state, &state_path, None).await;
         }
         false => {
             log!(LogLevel::Error, "Failed to spawn child process");
             let error = ErrorArrayItem::new(Errors::GeneralError, "child not spawned".to_string());
-            state.error_log.push(error);
+            log_error(&mut state, error, &state_path).await;
             wind_down_state(&mut state, &state_path).await;
             std::process::exit(100);
         }
@@ -135,6 +135,8 @@ async fn main() {
     };
 
     log!(LogLevel::Trace, "Entering main loop...");
+    state.status = Status::Running;
+    update_state(&mut state, &state_path, None).await;
     loop {
         tokio::select! {
             Some(event) = event_rx.recv() => {
