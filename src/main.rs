@@ -119,7 +119,7 @@ async fn main() {
 
     // Start monitoring the directory and get the asynchronous receiver
     log!(LogLevel::Trace, "Starting directory monitoring...");
-    let mut event_rx = match monitor_directory(settings.safe_path()).await {
+    let mut event_rx = match monitor_directory(settings.safe_path(), settings.ignored_paths()).await {
         Ok(receiver) => {
             log!(LogLevel::Trace, "Successfully started directory monitoring");
             receiver

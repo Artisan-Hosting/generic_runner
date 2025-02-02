@@ -120,6 +120,7 @@ pub struct AppSpecificConfig {
     pub monitor_path: String,
     pub project_path: String,
     pub changes_needed: i32,
+    pub ignored_subdirs: Vec<String>, // Add ignored subdirectories as strings
 }
 
 #[allow(dead_code)]
@@ -145,6 +146,7 @@ impl AppSpecificConfig {
             }
         }
     }
+
     pub fn project_path(&self) -> PathType {
         let self_cloned = self.clone();
         let path = PathType::Content(self_cloned.project_path);
@@ -166,6 +168,22 @@ impl AppSpecificConfig {
             }
         }
     }
+
+    /// Converts ignored_subdirs strings into PathType objects relative to the monitor_path
+    pub fn ignored_paths(&self) -> Option<Vec<PathType>> {
+        let base_path = self.safe_path(); // Canonicalize the monitor path
+        
+        let sub_dirs: Vec<PathType> = self.ignored_subdirs
+            .iter()
+            .map(|subdir| PathType::PathBuf(base_path.join(subdir))) // Join each subdir to the base path
+            .collect();
+
+        if sub_dirs.is_empty() {
+            return None
+        }
+
+        return Some(sub_dirs)
+    }
 }
 
 impl fmt::Display for AppSpecificConfig {
@@ -173,6 +191,7 @@ impl fmt::Display for AppSpecificConfig {
         write!(
             f,
             "{} {{\n\
+             \t{}: {},\n\
              \t{}: {},\n\
              \t{}: {},\n\
              \t{}: {},\n\
@@ -186,7 +205,9 @@ impl fmt::Display for AppSpecificConfig {
             "project_path".yellow(),
             self.project_path.clone().green(),
             "changes_needed".yellow(),
-            self.changes_needed.to_string().green()
+            self.changes_needed.to_string().green(),
+            "Ignored_directories".yellow(),
+            self.ignored_subdirs.join(" ").green()
         )
     }
 }
