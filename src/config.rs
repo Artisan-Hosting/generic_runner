@@ -3,7 +3,7 @@ use artisan_middleware::{
     config::AppConfig,
     dusa_collection_utils::{
         self,
-        stringy::Stringy,
+        types::stringy::Stringy,
         version::{SoftwareVersion, Version, VersionCode},
     },
     state_persistence::{update_state, AppState, StatePersistence},
@@ -14,8 +14,8 @@ use colored::Colorize;
 use config::{Config, ConfigError, File};
 use dusa_collection_utils::{
     log,
-    log::{set_log_level, LogLevel},
-    types::PathType,
+    logger::{set_log_level, LogLevel},
+    types::pathtype::PathType,
 };
 use serde::Deserialize;
 use std::fmt;
@@ -62,6 +62,7 @@ pub async fn generate_application_state(state_path: &PathType, config: &AppConfi
                 config: config.clone(),
                 name: config.app_name.to_string(),
                 pid: std::process::id(),
+                // stdout: Vec::new(),
                 version: {
                     // defining the version
                     let library_version: Version = aml_version();
@@ -75,6 +76,8 @@ pub async fn generate_application_state(state_path: &PathType, config: &AppConfi
                 },
                 system_application: false,
                 status: Status::Starting,
+                stdout: Vec::new(),
+                stderr: Vec::new(),
             };
             state.data = String::from("Initializing");
             state.config.debug_mode = config.debug_mode;

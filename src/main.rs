@@ -10,8 +10,8 @@ use config::{generate_application_state, get_config, specific_config};
 use dusa_collection_utils::{
     errors::{ErrorArrayItem, Errors},
     log,
-    log::LogLevel,
-    types::PathType,
+    logger::LogLevel,
+    types::pathtype::PathType,
 };
 use monitor::monitor_directory;
 use signals::{sighup_watch, sigusr_watch};
