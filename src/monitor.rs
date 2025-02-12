@@ -106,7 +106,7 @@ pub async fn monitor_directory(
                         recv_err
                     );
                     // Optional: add a small delay to prevent a busy loop if an error keeps occurring
-                    thread::sleep(Duration::from_secs(1));
+                    thread::sleep(Duration::from_secs(10));
                 }
             }
         }

@@ -45,6 +45,8 @@ pub async fn generate_application_state(state_path: &PathType, config: &AppConfi
             loaded_data.status = Status::Starting;
             loaded_data.pid = std::process::id();
             loaded_data.stared_at = current_timestamp();
+            loaded_data.stdout.clear();
+            loaded_data.stderr.clear();
             set_log_level(loaded_data.config.log_level);
             loaded_data.error_log.clear();
             update_state(&mut loaded_data, &state_path, None).await;

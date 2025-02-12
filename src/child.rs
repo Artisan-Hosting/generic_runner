@@ -1,4 +1,5 @@
 use artisan_middleware::dusa_collection_utils::errors::Errors;
+use artisan_middleware::dusa_collection_utils::functions::current_timestamp;
 use artisan_middleware::dusa_collection_utils::log;
 use artisan_middleware::process_manager::{
     spawn_complex_process, spawn_simple_process, SupervisedChild,
@@ -8,9 +9,9 @@ use artisan_middleware::{
     dusa_collection_utils::{errors::ErrorArrayItem, logger::LogLevel, types::pathtype::PathType},
     state_persistence::AppState,
 };
+use tokio::io::{AsyncBufReadExt, BufReader};
 // use std::{env, fs};
 use std::fs;
-use std::process::Stdio;
 use tokio::process::Command;
 
 use crate::config::AppSpecificConfig;
@@ -26,8 +27,6 @@ pub async fn create_child(
 
     command
         .args(&["--prefix", &settings.clone().project_path, "run", "start"]) // Updated to run "build" instead of "start"
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
         .env("NODE_ENV", "production") // Set NODE_ENV=production
         .env("PORT", "9500"); // Set PORT=3000
 
@@ -35,6 +34,7 @@ pub async fn create_child(
         Ok(mut spawned_child) => {
             // initialize monitor loop.
             spawned_child.monitor_usage().await;
+            spawned_child.monitor_stdx().await;
             // read the pid from the state
             let pid: u32 = match spawned_child.get_pid().await {
                 Ok(xid) => xid,
@@ -91,12 +91,32 @@ pub async fn run_one_shot_process(
             .arg("run")
             .arg("build")
             .env("NODE_ENV", "production"),
-        false,
+        true,
         state,
         state_path,
     )
     .await
     .map_err(ErrorArrayItem::from)?; // Add this line to set NODE_ENV=production
+
+    if let Some(std) = process.stdout.take() {
+        let buffer = BufReader::new(std);
+        let mut lines = buffer.lines();
+        while let Ok(Some(line)) = lines.next_line().await {
+            state.stdout.push((current_timestamp(), line));
+        }
+    } else {
+        log!(LogLevel::Error, "Failed to capture stddout for npm install");
+    }
+
+    if let Some(std) = process.stderr.take() {
+        let buffer = BufReader::new(std);
+        let mut lines = buffer.lines();
+        while let Ok(Some(line)) = lines.next_line().await {
+            state.stderr.push((current_timestamp(), line));
+        }
+    } else {
+        log!(LogLevel::Error, "Failed to capture stddout for npm install");
+    }
 
     match process.wait().await {
         Ok(_) => return Ok(()),
@@ -125,12 +145,32 @@ pub async fn run_install_process(
             .arg(settings.clone().project_path)
             .arg("install"),
         // .env("NODE_ENV", "production"),
-        false,
+        true,
         state,
         state_path,
     )
     .await
     .map_err(ErrorArrayItem::from)?;
+
+    if let Some(std) = process.stdout.take() {
+        let buffer = BufReader::new(std);
+        let mut lines = buffer.lines();
+        while let Ok(Some(line)) = lines.next_line().await {
+            state.stdout.push((current_timestamp(), line));
+        }
+    } else {
+        log!(LogLevel::Error, "Failed to capture stddout for npm install");
+    }
+
+    if let Some(std) = process.stderr.take() {
+        let buffer = BufReader::new(std);
+        let mut lines = buffer.lines();
+        while let Ok(Some(line)) = lines.next_line().await {
+            state.stderr.push((current_timestamp(), line));
+        }
+    } else {
+        log!(LogLevel::Error, "Failed to capture stddout for npm install");
+    }
 
     match process.wait().await {
         Ok(_) => return Ok(()),

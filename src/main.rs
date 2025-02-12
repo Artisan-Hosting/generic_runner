@@ -1,7 +1,7 @@
 use artisan_middleware::{
     aggregator::Status,
     config::AppConfig,
-    dusa_collection_utils::{self},
+    dusa_collection_utils::{self, logger::{get_log_level, set_log_level}},
     process_manager::SupervisedChild,
     state_persistence::{log_error, update_state, wind_down_state, AppState, StatePersistence},
 };
@@ -78,6 +78,8 @@ async fn main() {
         settings.safe_path()
     );
 
+    state.status = Status::Building;
+    update_state(&mut state, &state_path, None).await;
     // Running npm install 
     log!(LogLevel::Trace, "Running npm install");
     if let Err(err) = run_install_process(&settings, &mut state, &state_path).await {
@@ -95,26 +97,10 @@ async fn main() {
 
     log!(LogLevel::Trace, "Spawning child process...");
     let mut child: SupervisedChild = create_child(&mut state, &state_path, &settings).await;
-
-    match child.clone().await.running().await {
-        true => {
-            // * safe to call unwrap because we checked that the pid is running
-            let xid: u32 = child.clone().await.get_pid().await.unwrap();
-            log!(LogLevel::Info, "Child spawned: {}", xid);
-            state.data = format!("Child spawned: {}", xid);
-            state.status = Status::Running;
-            update_state(&mut state, &state_path, None).await;
-        }
-        false => {
-            log!(LogLevel::Error, "Failed to spawn child process");
-            let error = ErrorArrayItem::new(Errors::GeneralError, "child not spawned".to_string());
-            log_error(&mut state, error, &state_path).await;
-            wind_down_state(&mut state, &state_path).await;
-            std::process::exit(100);
-        }
-    }
     let mut change_count = 0;
     let trigger_count = settings.changes_needed;
+    state.status = Status::Running;
+    update_state(&mut state, &state_path, None).await;
 
     // Start monitoring the directory and get the asynchronous receiver
     log!(LogLevel::Trace, "Starting directory monitoring...");
@@ -168,9 +154,28 @@ async fn main() {
                 }
             }
             _ = tokio::time::sleep(Duration::from_secs(3)) => {
+                match child.get_std_out().await {
+                    Ok(mut stdvec) => {
+                        state.stdout.append(&mut stdvec);
+                    },
+                    Err(err) => {
+                        log!(LogLevel::Error, "Failed to get standart out: {}", err.err_mesg)
+                    },
+                }
+                
+                match child.get_std_err().await {
+                    Ok(mut errvec) => {
+                        state.stderr.append(&mut errvec);
+                    },
+                    Err(err) => {
+                        log!(LogLevel::Error, "Failed to get standart error: {}", err.err_mesg)
+                    },
+                }
+            }
+            _ = tokio::time::sleep(Duration::from_secs(5)) => {
                 log!(LogLevel::Trace, "Periodic task triggered - checking child process status...");
 
-                if !child.clone().await.running().await {
+                if !child.running().await {
                     log!(LogLevel::Warn, "Child process {:?} is not running. Restarting...", child.get_pid().await);
 
                     if let Ok(_) = child.kill().await {
@@ -186,6 +191,8 @@ async fn main() {
                     log!(LogLevel::Info, "One shot finished, Spawning new child");
 
                     child = create_child(&mut state, &state_path, &settings).await;
+                    child.monitor_stdx().await;
+                    child.monitor_usage().await;
                     let message = "New child process spawned";
 
                     log!(LogLevel::Info, "{message}");
@@ -253,6 +260,8 @@ async fn main() {
 
             // creating new service
             child = create_child(&mut state, &state_path, &settings).await;
+            child.monitor_stdx().await;
+            child.monitor_usage().await;
             log!(LogLevel::Info, "New child process spawned.");
 
             reload.store(false, Ordering::Relaxed);
@@ -288,6 +297,16 @@ async fn main() {
                     std::process::exit(100);
                 }
             }
+        }
+
+        if state.config.debug_mode {
+            let log_level = get_log_level();
+            set_log_level(LogLevel::Trace);
+            log!(LogLevel::Trace, "printing std out");
+            for lines in &state.stdout {
+                log!(LogLevel::Debug, "{}", lines.1);
+            }
+            set_log_level(log_level);    
         }
     }
 }
