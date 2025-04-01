@@ -1,7 +1,10 @@
 use artisan_middleware::{
     aggregator::Status,
     config::AppConfig,
-    dusa_collection_utils::{self, logger::{get_log_level, set_log_level}},
+    dusa_collection_utils::{
+        self,
+        logger::{get_log_level, set_log_level},
+    },
     process_manager::SupervisedChild,
     state_persistence::{log_error, update_state, wind_down_state, AppState, StatePersistence},
 };
@@ -80,7 +83,7 @@ async fn main() {
 
     state.status = Status::Building;
     update_state(&mut state, &state_path, None).await;
-    // Running npm install 
+    // Running npm install
     log!(LogLevel::Trace, "Running npm install");
     if let Err(err) = run_install_process(&settings, &mut state, &state_path).await {
         log!(LogLevel::Error, "{}", err)
@@ -104,7 +107,8 @@ async fn main() {
 
     // Start monitoring the directory and get the asynchronous receiver
     log!(LogLevel::Trace, "Starting directory monitoring...");
-    let mut event_rx = match monitor_directory(settings.safe_path(), settings.ignored_paths()).await {
+    let mut event_rx = match monitor_directory(settings.safe_path(), settings.ignored_paths()).await
+    {
         Ok(receiver) => {
             log!(LogLevel::Trace, "Successfully started directory monitoring");
             receiver
@@ -165,7 +169,7 @@ async fn main() {
                         log!(LogLevel::Error, "Failed to get standart out: {}", err.err_mesg)
                     },
                 }
-                
+
                 match child.get_std_err().await {
                     Ok(mut errvec) => {
                         state.stderr.append(&mut errvec);
@@ -232,7 +236,6 @@ async fn main() {
                 exit_graceful.store(true, Ordering::Relaxed);
             }
         }
-        
 
         if reload.load(Ordering::Relaxed) {
             log!(LogLevel::Debug, "Reloading");
@@ -306,7 +309,7 @@ async fn main() {
             for lines in &state.stdout {
                 log!(LogLevel::Debug, "{}", lines.1);
             }
-            set_log_level(log_level);    
+            set_log_level(log_level);
         }
     }
 }
