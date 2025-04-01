@@ -153,7 +153,10 @@ async fn main() {
                     change_count = 0; // Reset count
                 }
             }
-            _ = tokio::time::sleep(Duration::from_secs(3)) => {
+            _ = tokio::time::sleep(Duration::from_secs(5)) => {
+                log!(LogLevel::Trace, "Periodic task triggered - checking child process status...");
+
+                // Getting the stds out
                 match child.get_std_out().await {
                     Ok(mut stdvec) => {
                         state.stdout.append(&mut stdvec);
@@ -171,9 +174,6 @@ async fn main() {
                         log!(LogLevel::Error, "Failed to get standart error: {}", err.err_mesg)
                     },
                 }
-            }
-            _ = tokio::time::sleep(Duration::from_secs(5)) => {
-                log!(LogLevel::Trace, "Periodic task triggered - checking child process status...");
 
                 if !child.running().await {
                     log!(LogLevel::Warn, "Child process {:?} is not running. Restarting...", child.get_pid().await);
