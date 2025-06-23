@@ -12,6 +12,7 @@ use artisan_middleware::{
     state_persistence::AppState,
 };
 use std::fs;
+use shell_words::split;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 
@@ -24,12 +25,13 @@ pub async fn create_child(
 ) -> SupervisedChild {
     log!(LogLevel::Trace, "Creating child process...");
 
-    let mut command: Command = Command::new("npm");
-
-    command
-        .args(&["--prefix", &settings.clone().project_path, "run", "start"]) // Updated to run "build" instead of "start"
-        .env("NODE_ENV", "production") // Set NODE_ENV=production
-        .env("PORT", "9500"); // Set PORT=3000
+    let parts = split(&settings.run_command).unwrap_or_else(|_| settings.run_command.split_whitespace().map(|s| s.to_string()).collect());
+    let mut iter = parts.into_iter();
+    let program = iter.next().unwrap();
+    let mut command: Command = Command::new(program);
+    for arg in iter {
+        command.arg(arg);
+    }
 
     match spawn_complex_process(&mut command, Some(settings.project_path()), false, true).await {
         Ok(mut spawned_child) => {
@@ -85,19 +87,34 @@ pub async fn run_one_shot_process(
     state: &mut AppState,
     state_path: &PathType,
 ) -> Result<(), ErrorArrayItem> {
+    let build_cmd = match &settings.build_command {
+        Some(cmd) => cmd,
+        None => {
+            log!(LogLevel::Info, "No build command specified, skipping build step");
+            return Ok(());
+        }
+    };
+
+    let parts = split(build_cmd).unwrap_or_else(|_| build_cmd.split_whitespace().map(|s| s.to_string()).collect());
+    let mut iter = parts.into_iter();
+    let program = match iter.next() {
+        Some(p) => p,
+        None => return Ok(()),
+    };
+
+    let mut command = Command::new(program);
+    for arg in iter {
+        command.arg(arg);
+    }
+
     let mut process = spawn_simple_process(
-        Command::new("npm")
-            .arg("--prefix")
-            .arg(settings.clone().project_path)
-            .arg("run")
-            .arg("build")
-            .env("NODE_ENV", "production"),
+        &mut command,
         true,
         state,
         state_path,
     )
     .await
-    .map_err(ErrorArrayItem::from)?; // Add this line to set NODE_ENV=production
+    .map_err(ErrorArrayItem::from)?;
 
     if let Some(std) = process.stdout.take() {
         let buffer = BufReader::new(std);
@@ -133,19 +150,28 @@ pub async fn run_install_process(
     state: &mut AppState,
     state_path: &PathType,
 ) -> Result<(), ErrorArrayItem> {
-    // Set the environment variable NODE_ENV to "production"
-    // let command = Command::new("npm")
-    //     .arg("--prefix")
-    //     .arg(settings.clone().project_path)
-    //     .arg("install")
-    //     .env("NODE_ENV", "production"); // Add this line to set NODE_ENV=production
+    let install_cmd = match &settings.install_command {
+        Some(cmd) => cmd,
+        None => {
+            log!(LogLevel::Info, "No install command specified, skipping install step");
+            return Ok(());
+        }
+    };
+
+    let parts = split(install_cmd).unwrap_or_else(|_| install_cmd.split_whitespace().map(|s| s.to_string()).collect());
+    let mut iter = parts.into_iter();
+    let program = match iter.next() {
+        Some(p) => p,
+        None => return Ok(()),
+    };
+
+    let mut command = Command::new(program);
+    for arg in iter {
+        command.arg(arg);
+    }
 
     let mut process = spawn_simple_process(
-        Command::new("npm")
-            .arg("--prefix")
-            .arg(settings.clone().project_path)
-            .arg("install"),
-        // .env("NODE_ENV", "production"),
+        &mut command,
         true,
         state,
         state_path,

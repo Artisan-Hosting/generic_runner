@@ -111,6 +111,11 @@ pub struct AppSpecificConfig {
     pub project_path: String,
     pub changes_needed: i32,
     pub ignored_subdirs: Vec<String>, // Add ignored subdirectories as strings
+    #[serde(default)]
+    pub install_command: Option<String>,
+    #[serde(default)]
+    pub build_command: Option<String>,
+    pub run_command: String,
 }
 
 #[allow(dead_code)]
@@ -187,6 +192,9 @@ impl fmt::Display for AppSpecificConfig {
              \t{}: {},\n\
              \t{}: {},\n\
              \t{}: {},\n\
+             \t{}: {:?},\n\
+             \t{}: {:?},\n\
+             \t{}: {},\n\
              }}",
             "AppSpecificConfig".cyan().bold(),
             "interval_seconds".yellow(),
@@ -198,7 +206,13 @@ impl fmt::Display for AppSpecificConfig {
             "changes_needed".yellow(),
             self.changes_needed.to_string().green(),
             "Ignored_directories".yellow(),
-            self.ignored_subdirs.join(" ").green()
+            self.ignored_subdirs.join(" ").green(),
+            "install_command".yellow(),
+            self.install_command,
+            "build_command".yellow(),
+            self.build_command,
+            "run_command".yellow(),
+            self.run_command.clone().green()
         )
     }
 }
