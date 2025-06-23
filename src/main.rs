@@ -1,7 +1,10 @@
 use artisan_middleware::{
     aggregator::Status,
     config::AppConfig,
-    dusa_collection_utils::{self, core::logger::{get_log_level, set_log_level}},
+    dusa_collection_utils::{
+        self,
+        core::logger::{get_log_level, set_log_level},
+    },
     process_manager::SupervisedChild,
     state_persistence::{log_error, update_state, wind_down_state, AppState, StatePersistence},
 };
@@ -9,9 +12,9 @@ use child::{create_child, run_install_process, run_one_shot_process};
 use config::{generate_application_state, get_config, specific_config};
 use dusa_collection_utils::{
     core::errors::{ErrorArrayItem, Errors},
-    log,
     core::logger::LogLevel,
     core::types::pathtype::PathType,
+    log,
 };
 use monitor::monitor_directory;
 use signals::{sighup_watch, sigusr_watch};
