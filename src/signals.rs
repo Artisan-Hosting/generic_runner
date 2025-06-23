@@ -1,6 +1,6 @@
 use artisan_middleware::dusa_collection_utils;
 use dusa_collection_utils::log;
-use dusa_collection_utils::logger::LogLevel;
+use dusa_collection_utils::core::logger::LogLevel;
 use nix::libc::SIGUSR1;
 use signal_hook::{consts::signal::SIGHUP, iterator::Signals};
 use std::sync::{

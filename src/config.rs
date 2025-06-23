@@ -3,8 +3,8 @@ use artisan_middleware::{
     config::AppConfig,
     dusa_collection_utils::{
         self,
-        types::stringy::Stringy,
-        version::{SoftwareVersion, Version, VersionCode},
+        core::types::stringy::Stringy,
+        core::version::{SoftwareVersion, Version, VersionCode},
     },
     state_persistence::{update_state, AppState, StatePersistence},
     timestamp::current_timestamp,
@@ -13,9 +13,9 @@ use artisan_middleware::{
 use colored::Colorize;
 use config::{Config, ConfigError, File};
 use dusa_collection_utils::{
+    core::logger::{set_log_level, LogLevel},
+    core::types::pathtype::PathType,
     log,
-    logger::{set_log_level, LogLevel},
-    types::pathtype::PathType,
 };
 use serde::Deserialize;
 use std::fmt;

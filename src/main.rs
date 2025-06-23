@@ -1,20 +1,17 @@
 use artisan_middleware::{
     aggregator::Status,
     config::AppConfig,
-    dusa_collection_utils::{
-        self,
-        logger::{get_log_level, set_log_level},
-    },
+    dusa_collection_utils::{self, core::logger::{get_log_level, set_log_level}},
     process_manager::SupervisedChild,
     state_persistence::{log_error, update_state, wind_down_state, AppState, StatePersistence},
 };
 use child::{create_child, run_install_process, run_one_shot_process};
 use config::{generate_application_state, get_config, specific_config};
 use dusa_collection_utils::{
-    errors::{ErrorArrayItem, Errors},
+    core::errors::{ErrorArrayItem, Errors},
     log,
-    logger::LogLevel,
-    types::pathtype::PathType,
+    core::logger::LogLevel,
+    core::types::pathtype::PathType,
 };
 use monitor::monitor_directory;
 use signals::{sighup_watch, sigusr_watch};
@@ -215,7 +212,7 @@ async fn main() {
                 state.data = String::from("Nominal");
                 if let Ok(metrics) = child.get_metrics().await {
                     // Ensuring we are within the specified limits
-                    if metrics.memory_usage >= state.config.max_ram_usage as f32 {
+                    if metrics.memory_usage >= state.config.max_ram_usage as f64 {
                         state.error_log.push(ErrorArrayItem::new(Errors::OverRamLimit, "Application has exceeded ram limit"))
                     }
 
