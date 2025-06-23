@@ -64,7 +64,6 @@ pub async fn generate_application_state(state_path: &PathType, config: &AppConfi
                 config: config.clone(),
                 name: config.app_name.to_string(),
                 pid: std::process::id(),
-                // stdout: Vec::new(),
                 version: {
                     // defining the version
                     let library_version: Version = aml_version();

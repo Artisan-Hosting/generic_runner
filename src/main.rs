@@ -2,20 +2,16 @@ use artisan_middleware::{
     aggregator::Status,
     config::AppConfig,
     dusa_collection_utils::{
-        self,
-        core::logger::{get_log_level, set_log_level},
+        core::errors::{ErrorArrayItem, Errors},
+        core::logger::{get_log_level, set_log_level, LogLevel},
+        core::types::pathtype::PathType,
+        log,
     },
     process_manager::SupervisedChild,
     state_persistence::{log_error, update_state, wind_down_state, AppState, StatePersistence},
 };
 use child::{create_child, run_install_process, run_one_shot_process};
 use config::{generate_application_state, get_config, specific_config};
-use dusa_collection_utils::{
-    core::errors::{ErrorArrayItem, Errors},
-    core::logger::LogLevel,
-    core::types::pathtype::PathType,
-    log,
-};
 use monitor::monitor_directory;
 use signals::{sighup_watch, sigusr_watch};
 use std::{
@@ -211,13 +207,12 @@ async fn main() {
                 }
 
                 // this is just a trimming function to limit the upstream communications
-                if state.error_log.len() >= 3 { // * Change this limit dependent on the project
-                    state.error_log.remove(0);
+                if state.error_log.len() >= 3 {
                     state.error_log.dedup();
+                    state.error_log.truncate(3);
                 }
 
                 // Update state as needed
-                state.data = String::from("Nominal");
                 if let Ok(metrics) = child.get_metrics().await {
                     // Ensuring we are within the specified limits
                     if metrics.memory_usage >= state.config.max_ram_usage as f64 {
@@ -225,6 +220,7 @@ async fn main() {
                     }
 
                     state.status = Status::Running;
+                    state.data = String::from("Nominal");
                     update_state(&mut state, &state_path, Some(metrics)).await;
                 } else {
                     state.data = String::from("Failed to get metric data");
@@ -232,8 +228,6 @@ async fn main() {
                     state.status = Status::Warning;
                     update_state(&mut state, &state_path, None).await;
                 }
-
-
             }
 
             _ = tokio::signal::ctrl_c() => {
@@ -244,7 +238,7 @@ async fn main() {
 
         if reload.load(Ordering::Relaxed) {
             log!(LogLevel::Debug, "Reloading");
-
+            
             // reload config file
             config = get_config();
 
@@ -255,6 +249,7 @@ async fn main() {
             if let Err(err) = child.kill().await {
                 log_error(&mut state, err, &state_path).await;
                 wind_down_state(&mut state, &state_path).await;
+            
                 // We're in a weird state kys and let systemd try again.
                 std::process::exit(100)
             }
@@ -284,6 +279,25 @@ async fn main() {
                     Ok(_) => {
                         state.status = Status::Stopping;
                         wind_down_state(&mut state, &state_path).await;
+                        // ? Because of exit conditions like these where we just fuck off and let systemd clean up the mess
+                        // ? It's important that the service file is configured to actually clean up the mess, a few notes.
+                        
+                        // ? Systemd must be configured to kill all of our children if we die. The library logic is setup to attempt
+                        // ? to reclaim a pid we store but with complex applications like node bs, we can't currently realiably take 
+                        // ? control of the entire process group again. This will cause our startup to fail but report that we're running.
+                
+                        // ? This will confuse the api and break billing reporting a valid instance of the application with 0 usage.
+
+                        // ? This could also cause potential silent outages, A situation where the manager and apis belive the instance
+                        // ? is running healthily when the users code cant start because of contested resources
+
+                        // ? Second and a bit messier we need systemd to let us die in peace. Restart=on-failure will break all of the
+                        // ? immediatly upstream api components. If the portal sends a command for us to terminate and we do but systemd restarts us
+                        // ? there is a none 0 chance the DB, ais_manager and API will get out of sync on what state we're in. Best case
+                        // ? logging data and statistics are a bit wonky for a minute then everyone get's back on the same page. Worts case.
+                        // ? Everyone starts fighting trying to assert their state as the truth, startarting, killing and otherwise fucking 
+                        // ? everything, this will RUIN user billing for this period, and may bug out the ais_manager causing all communications
+                        // ? to the given node to fail. 
                         std::process::exit(0);
                     }
                     Err(err) => {

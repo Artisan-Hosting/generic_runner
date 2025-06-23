@@ -144,7 +144,6 @@ pub async fn run_one_shot_process(
     }
 }
 
-// Sometimes we need a lil npm install
 pub async fn run_install_process(
     settings: &AppSpecificConfig,
     state: &mut AppState,
