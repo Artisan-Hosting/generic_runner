@@ -2,4 +2,8 @@
 interval_seconds = "30"
 monitor_path = "./"
 project_path = "./"
-changes_needed = "10" # Guess config for now 
+changes_needed = "10"
+install_command = "npm install"
+build_command = "npm run build"
+run_command = "npm run start"
+ignored_subdirs = []

@@ -83,19 +83,22 @@ async fn main() {
 
     state.status = Status::Building;
     update_state(&mut state, &state_path, None).await;
-    // Running npm install
-    log!(LogLevel::Trace, "Running npm install");
-    if let Err(err) = run_install_process(&settings, &mut state, &state_path).await {
-        log!(LogLevel::Error, "{}", err)
+    if settings.install_command.is_some() {
+        log!(LogLevel::Trace, "Running install step");
+        if let Err(err) = run_install_process(&settings, &mut state, &state_path).await {
+            log!(LogLevel::Error, "{}", err)
+        }
     }
 
     // Spawn child process
     log!(LogLevel::Trace, "Running one shot pre child");
-    // Run the one-shot process before creating the child
-    if let Err(err) = run_one_shot_process(&settings, &mut state, &state_path).await {
-        log!(LogLevel::Error, "One-shot process failed: {}", err);
-        log_error(&mut state, err, &state_path).await;
-        return;
+    if settings.build_command.is_some() {
+        log!(LogLevel::Trace, "Running build step");
+        if let Err(err) = run_one_shot_process(&settings, &mut state, &state_path).await {
+            log!(LogLevel::Error, "One-shot process failed: {}", err);
+            log_error(&mut state, err, &state_path).await;
+            return;
+        }
     }
 
     log!(LogLevel::Trace, "Spawning child process...");
@@ -186,10 +189,12 @@ async fn main() {
                         log!(LogLevel::Info, "Executed the previous child")
                     }
 
-                    if let Err(err) = run_one_shot_process(&settings, &mut state, &state_path).await {
-                        log!(LogLevel::Error, "One-shot process failed: {}", err);
-                        log_error(&mut state, err, &state_path).await;
-                        return;
+                    if settings.build_command.is_some() {
+                        if let Err(err) = run_one_shot_process(&settings, &mut state, &state_path).await {
+                            log!(LogLevel::Error, "One-shot process failed: {}", err);
+                            log_error(&mut state, err, &state_path).await;
+                            return;
+                        }
                     }
 
                     log!(LogLevel::Info, "One shot finished, Spawning new child");
@@ -254,11 +259,13 @@ async fn main() {
                 std::process::exit(100)
             }
 
-            // running one shot again
-            if let Err(err) = run_one_shot_process(&settings, &mut state, &state_path).await {
-                log!(LogLevel::Error, "One-shot process failed: {}", err);
-                log_error(&mut state, err, &state_path).await;
-                return;
+            // running one shot again if configured
+            if settings.build_command.is_some() {
+                if let Err(err) = run_one_shot_process(&settings, &mut state, &state_path).await {
+                    log!(LogLevel::Error, "One-shot process failed: {}", err);
+                    log_error(&mut state, err, &state_path).await;
+                    return;
+                }
             }
 
             // creating new service
