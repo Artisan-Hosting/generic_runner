@@ -108,8 +108,25 @@ The `AppSpecificConfig` provides application-specific settings and is loaded usi
 - **`monitor_path`**: The directory path to monitor for changes.
 - **`project_path`**: The path to the project that needs one-shot processing or monitoring.
 - **`changes_needed`**: The number of changes needed in the monitored directory to trigger a restart of the child process.
+- **`install_command`**: *(optional)* A command to install dependencies before the application is built. If omitted, no install step is performed.
+- **`build_command`**: *(optional)* A command to build the project prior to running it. If omitted, the build step is skipped.
+- **`run_command`**: The command used to start the main child process.
 
 These configurations are loaded from a file called `Config.toml`, which can be customized to match your environment.
+
+An example `Config.toml` might look like:
+
+```toml
+[app_specific]
+interval_seconds = "30"
+monitor_path = "./"
+project_path = "./"
+changes_needed = "10"
+install_command = "npm install"
+build_command = "npm run build"
+run_command = "npm run start"
+ignored_subdirs = []
+```
 
 ### Logging
 
