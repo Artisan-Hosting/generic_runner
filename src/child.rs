@@ -99,7 +99,10 @@ pub async fn run_one_shot_process(
     let mut iter = parts.into_iter();
     let program = match iter.next() {
         Some(p) => p,
-        None => return Ok(()),
+        None => {
+            log!(LogLevel::Warn, "Exting build pre-maturly");
+            return Ok(())
+        },
     };
 
     let mut command = Command::new(program);
@@ -137,7 +140,10 @@ pub async fn run_one_shot_process(
     }
 
     match process.wait().await {
-        Ok(_) => return Ok(()),
+        Ok(_) => {
+            log!(LogLevel::Debug, "build exited as expected");
+            return Ok(())
+        },
         Err(err) => {
             return Err(ErrorArrayItem::new(Errors::GeneralError, err.to_string()));
         }

@@ -681,33 +681,6 @@ dependencies = [
 
 [[package]]
 name = "dusa_collection_utils"
-version = "3.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "30dba624f5b6b024f24260788325d6957ed1c5f003815cd277bb8242f0d88acf"
-dependencies = [
- "block-modes",
- "cfg_rust_features",
- "colored",
- "flate2",
- "hex",
- "lazy_static",
- "nix 0.20.2",
- "rand 0.8.5",
- "regex",
- "reqwest",
- "rustversion",
- "serde",
- "serde_json",
- "serde_yaml",
- "sha2",
- "tar",
- "tempfile",
- "tokio",
- "walkdir",
-]
-
-[[package]]
-name = "dusa_collection_utils"
 version = "4.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "791754b63b86c15a8a49d3a19adfc2631fbac45cd10713307b7b1c84826eef29"
@@ -2735,15 +2708,15 @@ dependencies = [
 
 [[package]]
 name = "simple_comms"
-version = "1.2.1"
+version = "1.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8fdad0d7c5d795906379d1045756b1af13c49f0a10aefaf29a5869b33e0e2048"
+checksum = "097a94de18b6561fd8c52af55cddae4efd2a4372cfc2e2106b73a98c5c5b1cf4"
 dependencies = [
  "aes-gcm",
  "bincode",
  "bitflags 2.8.0",
  "colored",
- "dusa_collection_utils 3.2.1",
+ "dusa_collection_utils 4.0.1",
  "flate2",
  "get_if_addrs",
  "hex",

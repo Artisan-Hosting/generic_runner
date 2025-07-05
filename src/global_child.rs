@@ -23,4 +23,3 @@ pub async fn replace(child: SupervisedChild) {
     let mut lock = GLOBAL_CHILD.lock().await;
     *lock = Some(child);
 }
-

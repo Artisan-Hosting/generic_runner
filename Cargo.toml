@@ -6,7 +6,7 @@ edition = "2021"
 [dependencies]
 artisan_middleware = "^5.4.0"
 # dir_watcher = { path = "/home/dwhitfield/Developer/Artisan_Hosting/Libraries/folder_monitor" }
-#artisan_middleware = { path = "/home/dwhitfield/Developer/Artisan_Hosting/Libraries/artisan_middleware_lib" }
+#artisan_middleware = { path = "/home/dwhitfield/Developer/Artisan_Hosting/Libraries/artisan_lib" }
 config = "0.14.0"
 serde = "1.0.210"
 serde_json = "1.0.128"

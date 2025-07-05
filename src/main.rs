@@ -1,3 +1,4 @@
+use ais_fe518f53::global_child::GLOBAL_CHILD;
 use artisan_middleware::{
     aggregator::Status,
     config::AppConfig,
@@ -20,8 +21,8 @@ use dusa_collection_utils::{
     core::types::pathtype::PathType,
     log,
 };
-use signals::{sighup_watch, sigusr_watch};
 use global_child::{init as init_global_child, replace as replace_global_child};
+use signals::{sighup_watch, sigusr_watch};
 use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -29,13 +30,13 @@ use std::{
     },
     time::Duration,
 };
-use tokio::time::timeout;
+use tokio::time::{sleep, timeout};
 
 mod child;
 mod config;
 // // mod monitor;
-mod signals;
 mod global_child;
+mod signals;
 
 #[tokio::main]
 async fn main() {
@@ -107,8 +108,12 @@ async fn main() {
     }
 
     log!(LogLevel::Trace, "Spawning child process...");
+
     let mut child: SupervisedChild = create_child(&mut state, &state_path, &settings).await;
+    child.monitor_stdx().await;
+    child.monitor_usage().await;
     init_global_child(child.clone().await).await;
+
     let mut change_count = 0;
     let trigger_count = settings.changes_needed;
     state.status = Status::Running;
@@ -158,20 +163,35 @@ async fn main() {
                     update_state(&mut state, &state_path, None).await;
                     log!(LogLevel::Info, "Killing the child");
 
-                    match child.clone().await.kill().await {
-                        Ok(_) => {
-                            // creating new child
-                            log!(LogLevel::Trace, "Spawning child process...");
-                            drop(child);
-                            child = create_child(&mut state, &state_path, &settings).await;
-                            replace_global_child(child.clone().await).await;
-                            log!(LogLevel::Debug, "New child process spawned: {}", child.get_pid().await.unwrap());
-                        },
-                        Err(error) => {
-                            log!(LogLevel::Error, "Failed to wait for child process termination: {}", error);
-                            log_error(&mut state, error, &state_path).await;
-                        },
+                    if let Some(child) = GLOBAL_CHILD.lock().await.as_mut() {
+                        if let Err(err) = child.kill().await {
+                            log!(LogLevel::Error, "Error killing child: {}, requesting reload", err.err_mesg);
+                            reload.store(true, Ordering::Relaxed);
+                        }
                     }
+
+                    { // This coupled with kill_on_drop ensures that even if we don't properly kill the application it get's nuked
+                        let mut _raw_child = GLOBAL_CHILD.lock().await.as_mut();
+                        _raw_child = None;
+                        sleep(Duration::from_secs(1)).await;
+                    }
+
+                    // Spawn child process
+                    log!(LogLevel::Trace, "Running one shot pre child");
+                    if settings.build_command.is_some() {
+                        log!(LogLevel::Info, "Running build step");
+                        if let Err(err) = run_one_shot_process(&settings, &mut state, &state_path).await {
+                            log!(LogLevel::Error, "One-shot process failed: {}", err);
+                            log_error(&mut state, err, &state_path).await;
+                            return;
+                        }
+                    }
+
+                    replace_global_child(create_child(&mut state, &state_path, &settings).await).await;
+                    if let Some(child) = GLOBAL_CHILD.lock().await.as_mut() {
+                        child.monitor_stdx().await;
+                        child.monitor_usage().await;
+                    };
 
                     change_count = 0; // Reset count
                 }
@@ -215,10 +235,11 @@ async fn main() {
 
                     log!(LogLevel::Info, "One shot finished, Spawning new child");
 
-                    child = create_child(&mut state, &state_path, &settings).await;
-                    replace_global_child(child.clone().await).await;
-                    child.monitor_stdx().await;
-                    child.monitor_usage().await;
+                    replace_global_child(create_child(&mut state, &state_path, &settings).await).await;
+                    if let Some(child) = GLOBAL_CHILD.lock().await.as_mut() {
+                        child.monitor_stdx().await;
+                        child.monitor_usage().await;
+                    };
                     let message = "New child process spawned";
 
                     log!(LogLevel::Info, "{message}");
@@ -286,19 +307,19 @@ async fn main() {
             }
 
             // creating new service
-            drop(child);
-            child = create_child(&mut state, &state_path, &settings).await;
-            replace_global_child(child.clone().await).await;
-            child.monitor_stdx().await;
-            child.monitor_usage().await;
-            log!(LogLevel::Info, "New child process spawned.");
+            replace_global_child(create_child(&mut state, &state_path, &settings).await).await;
+            if let Some(child) = GLOBAL_CHILD.lock().await.as_mut() {
+                child.monitor_stdx().await;
+                child.monitor_usage().await;
+            };
 
+            log!(LogLevel::Info, "New child process spawned.");
             reload.store(false, Ordering::Relaxed);
         }
 
         if exit_graceful.load(Ordering::Relaxed) {
             log!(LogLevel::Debug, "Exiting gracefully");
-            match timeout(Duration::from_secs(3), child.kill()).await {
+            match timeout(Duration::from_secs(5), child.kill()).await {
                 Ok(execution_result) => match execution_result {
                     Ok(_) => {
                         state.status = Status::Stopping;
