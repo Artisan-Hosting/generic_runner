@@ -1,8 +1,8 @@
-use ais_fe518f53::child::{create_child};
-use ais_fe518f53::config::{generate_application_state};
+use ais_runner::child::{create_child};
+use ais_runner::config::{generate_application_state};
 use artisan_middleware::config::AppConfig;
 use artisan_middleware::state_persistence::{StatePersistence, update_state};
-use ais_fe518f53::config::AppSpecificConfig;
+use ais_runner::config::AppSpecificConfig;
 use tempfile::tempdir;
 use tokio::time::{sleep, Duration};
 

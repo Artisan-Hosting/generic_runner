@@ -1,4 +1,4 @@
-use ais_fe518f53::global_child::GLOBAL_CHILD;
+use crate::global_child::{get_event_reciver, init_child, init_monitor, replace_child, replace_monitor, GLOBAL_CHILD, GLOBAL_MONITOR};
 use artisan_middleware::{
     aggregator::Status,
     config::AppConfig,
@@ -15,13 +15,13 @@ use dir_watcher::{
     object::{MonitorMode, RawFileMonitor, RecursiveMode},
     options::Options,
 };
+
 use dusa_collection_utils::{
     core::errors::{ErrorArrayItem, Errors},
     core::logger::LogLevel,
     core::types::pathtype::PathType,
     log,
 };
-use global_child::{init as init_global_child, replace as replace_global_child};
 use signals::{sighup_watch, sigusr_watch};
 use std::{
     sync::{
@@ -34,7 +34,6 @@ use tokio::time::{sleep, timeout};
 
 mod child;
 mod config;
-// // mod monitor;
 mod global_child;
 mod signals;
 
@@ -112,7 +111,7 @@ async fn main() {
     let mut child: SupervisedChild = create_child(&mut state, &state_path, &settings).await;
     child.monitor_stdx().await;
     child.monitor_usage().await;
-    init_global_child(child.clone().await).await;
+    init_child(child.clone().await).await;
 
     let mut change_count = 0;
     let trigger_count = settings.changes_needed;
@@ -129,21 +128,29 @@ async fn main() {
         .set_interval(settings.interval_seconds.into())
         .set_validation(true);
 
-    let monitor: RawFileMonitor = RawFileMonitor::new(options).await;
+    let monitor: RawFileMonitor = RawFileMonitor::new(options.clone()).await;
     monitor.start().await;
 
-    let mut event_rx = match monitor.subscribe().await {
-        Some(rx) => rx,
-        None => {
-            log!(LogLevel::Error, "Failed to subscribe to the dir monitor");
-            state.error_log.push(ErrorArrayItem::new(
-                Errors::GeneralError,
-                "Failed to subscribe to the dir monitor",
-            ));
-            wind_down_state(&mut state, &state_path).await;
-            std::process::exit(100);
-        }
+    let mut event_rx = match get_event_reciver().await {
+        Ok(recv) => recv,
+        Err(_) => {
+            log!(LogLevel::Warn, "File monitor in a weird state, re-initializing"); 
+            let monitor: RawFileMonitor = RawFileMonitor::new(options).await;
+            replace_monitor(monitor).await;
+            match get_event_reciver().await {
+                Ok(recv) => recv,
+                Err(_) => {
+                    log_error(&mut state, ErrorArrayItem::new(Errors::GeneralError, "Failed to start folder monitor"), &state_path).await;
+                    wind_down_state(&mut state, &state_path).await;
+                    std::process::exit(100);
+                },
+            }
+        },
     };
+
+
+
+    init_monitor(monitor).await;
 
     log!(LogLevel::Trace, "Entering main loop...");
     state.status = Status::Running;
@@ -157,6 +164,11 @@ async fn main() {
                 log!(LogLevel::Debug, "Event details: {:?}", event);
 
                 if change_count >= trigger_count {
+                    if let Some(monitor) = GLOBAL_MONITOR.lock().await.as_mut() {
+                        monitor.stop();
+                    }
+
+                    // monitor;
                     log!(LogLevel::Info, "Reached {} changes, handling event", trigger_count);
                     state.event_counter += 1;
                     state.status = Status::Building;
@@ -187,13 +199,16 @@ async fn main() {
                         }
                     }
 
-                    replace_global_child(create_child(&mut state, &state_path, &settings).await).await;
+                    replace_child(create_child(&mut state, &state_path, &settings).await).await;
                     if let Some(child) = GLOBAL_CHILD.lock().await.as_mut() {
                         child.monitor_stdx().await;
                         child.monitor_usage().await;
                     };
 
                     change_count = 0; // Reset count
+                    if let Some(monitor) = GLOBAL_MONITOR.lock().await.as_mut() {
+                        monitor.start().await;
+                    }
                 }
             }
             _ = tokio::time::sleep(Duration::from_secs(5)) => {
@@ -235,7 +250,7 @@ async fn main() {
 
                     log!(LogLevel::Info, "One shot finished, Spawning new child");
 
-                    replace_global_child(create_child(&mut state, &state_path, &settings).await).await;
+                    replace_child(create_child(&mut state, &state_path, &settings).await).await;
                     if let Some(child) = GLOBAL_CHILD.lock().await.as_mut() {
                         child.monitor_stdx().await;
                         child.monitor_usage().await;
@@ -307,7 +322,7 @@ async fn main() {
             }
 
             // creating new service
-            replace_global_child(create_child(&mut state, &state_path, &settings).await).await;
+            replace_child(create_child(&mut state, &state_path, &settings).await).await;
             if let Some(child) = GLOBAL_CHILD.lock().await.as_mut() {
                 child.monitor_stdx().await;
                 child.monitor_usage().await;
