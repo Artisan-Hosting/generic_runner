@@ -140,13 +140,18 @@ pub async fn run_one_shot_process(
     }
 
     match process.wait().await {
-        Ok(_) => {
-            log!(LogLevel::Debug, "build exited as expected");
-            return Ok(())
-        },
-        Err(err) => {
-            return Err(ErrorArrayItem::new(Errors::GeneralError, err.to_string()));
+        Ok(status) => {
+            if status.success() {
+                log!(LogLevel::Debug, "build exited as expected");
+                Ok(())
+            } else {
+                Err(ErrorArrayItem::new(
+                    Errors::GeneralError,
+                    format!("Build command exited with status: {}", status),
+                ))
+            }
         }
+        Err(err) => Err(ErrorArrayItem::new(Errors::GeneralError, err.to_string())),
     }
 }
 
@@ -206,9 +211,16 @@ pub async fn run_install_process(
     }
 
     match process.wait().await {
-        Ok(_) => return Ok(()),
-        Err(err) => {
-            return Err(ErrorArrayItem::new(Errors::GeneralError, err.to_string()));
+        Ok(status) => {
+            if status.success() {
+                Ok(())
+            } else {
+                Err(ErrorArrayItem::new(
+                    Errors::GeneralError,
+                    format!("Install command exited with status: {}", status),
+                ))
+            }
         }
+        Err(err) => Err(ErrorArrayItem::new(Errors::GeneralError, err.to_string())),
     }
 }
