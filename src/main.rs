@@ -21,6 +21,7 @@ use dusa_collection_utils::{
     log,
 };
 use signals::{sighup_watch, sigusr_watch};
+use global_child::{init as init_global_child, replace as replace_global_child};
 use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -34,6 +35,7 @@ mod child;
 mod config;
 // // mod monitor;
 mod signals;
+mod global_child;
 
 #[tokio::main]
 async fn main() {
@@ -106,6 +108,7 @@ async fn main() {
 
     log!(LogLevel::Trace, "Spawning child process...");
     let mut child: SupervisedChild = create_child(&mut state, &state_path, &settings).await;
+    init_global_child(child.clone().await).await;
     let mut change_count = 0;
     let trigger_count = settings.changes_needed;
     state.status = Status::Running;
@@ -160,7 +163,8 @@ async fn main() {
                             // creating new child
                             log!(LogLevel::Trace, "Spawning child process...");
                             drop(child);
-                            let mut child = create_child(&mut state, &state_path, &settings).await;
+                            child = create_child(&mut state, &state_path, &settings).await;
+                            replace_global_child(child.clone().await).await;
                             log!(LogLevel::Debug, "New child process spawned: {}", child.get_pid().await.unwrap());
                         },
                         Err(error) => {
@@ -212,6 +216,7 @@ async fn main() {
                     log!(LogLevel::Info, "One shot finished, Spawning new child");
 
                     child = create_child(&mut state, &state_path, &settings).await;
+                    replace_global_child(child.clone().await).await;
                     child.monitor_stdx().await;
                     child.monitor_usage().await;
                     let message = "New child process spawned";
@@ -282,7 +287,8 @@ async fn main() {
 
             // creating new service
             drop(child);
-            let mut child = create_child(&mut state, &state_path, &settings).await;
+            child = create_child(&mut state, &state_path, &settings).await;
+            replace_global_child(child.clone().await).await;
             child.monitor_stdx().await;
             child.monitor_usage().await;
             log!(LogLevel::Info, "New child process spawned.");

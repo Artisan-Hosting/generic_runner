@@ -105,6 +105,7 @@ dependencies = [
  "config 0.14.1",
  "dir_watcher",
  "nix 0.29.0",
+ "once_cell",
  "rand 0.8.5",
  "rng",
  "serde",
