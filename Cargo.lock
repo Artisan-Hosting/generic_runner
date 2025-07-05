@@ -610,6 +610,8 @@ dependencies = [
 [[package]]
 name = "dir_watcher"
 version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "df042dc9e22f760a275fdabb7e2d67084429bfad475de84b1b51b9e4fd4b826c"
 dependencies = [
  "dusa_collection_utils 4.0.1",
  "futures 0.3.31",
