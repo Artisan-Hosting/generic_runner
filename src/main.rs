@@ -10,13 +10,16 @@ use artisan_middleware::{
 };
 use child::{create_child, run_install_process, run_one_shot_process};
 use config::{generate_application_state, get_config, specific_config};
+use dir_watcher::{
+    object::{MonitorMode, RawFileMonitor, RecursiveMode},
+    options::Options,
+};
 use dusa_collection_utils::{
     core::errors::{ErrorArrayItem, Errors},
     core::logger::LogLevel,
     core::types::pathtype::PathType,
     log,
 };
-use monitor::monitor_directory;
 use signals::{sighup_watch, sigusr_watch};
 use std::{
     sync::{
@@ -29,7 +32,7 @@ use tokio::time::timeout;
 
 mod child;
 mod config;
-mod monitor;
+// // mod monitor;
 mod signals;
 
 #[tokio::main]
@@ -110,19 +113,27 @@ async fn main() {
 
     // Start monitoring the directory and get the asynchronous receiver
     log!(LogLevel::Trace, "Starting directory monitoring...");
-    let mut event_rx = match monitor_directory(settings.safe_path(), settings.ignored_paths()).await
-    {
-        Ok(receiver) => {
-            log!(LogLevel::Trace, "Successfully started directory monitoring");
-            receiver
-        }
-        Err(err) => {
-            log!(LogLevel::Error, "Watcher error: {}", err);
-            state
-                .error_log
-                .push(ErrorArrayItem::new(Errors::GeneralError, err.to_string()));
+    let options: Options = Options::default()
+        .set_mode(RecursiveMode::Recursive)
+        .set_monitor_mode(MonitorMode::Modify)
+        .add_ignored_dirs(settings.ignored_paths())
+        .set_target_dir(settings.safe_path())
+        .set_interval(settings.interval_seconds.into())
+        .set_validation(true);
+
+    let monitor: RawFileMonitor = RawFileMonitor::new(options).await;
+    monitor.start().await;
+
+    let mut event_rx = match monitor.subscribe().await {
+        Some(rx) => rx,
+        None => {
+            log!(LogLevel::Error, "Failed to subscribe to the dir monitor");
+            state.error_log.push(ErrorArrayItem::new(
+                Errors::GeneralError,
+                "Failed to subscribe to the dir monitor",
+            ));
             wind_down_state(&mut state, &state_path).await;
-            std::process::exit(0);
+            std::process::exit(100);
         }
     };
 
@@ -131,7 +142,7 @@ async fn main() {
     update_state(&mut state, &state_path, None).await;
     loop {
         tokio::select! {
-            Some(event) = event_rx.recv() => {
+            Ok(event) = event_rx.recv() => {
                 log!(LogLevel::Trace, "Received directory change event: {:?}", event);
                 change_count += 1;
                 log!(LogLevel::Info, "Change detected: {} out of {}", change_count, trigger_count);
@@ -148,7 +159,8 @@ async fn main() {
                         Ok(_) => {
                             // creating new child
                             log!(LogLevel::Trace, "Spawning child process...");
-                            child = create_child(&mut state, &state_path, &settings).await;
+                            drop(child);
+                            let mut child = create_child(&mut state, &state_path, &settings).await;
                             log!(LogLevel::Debug, "New child process spawned: {}", child.get_pid().await.unwrap());
                         },
                         Err(error) => {
@@ -269,7 +281,8 @@ async fn main() {
             }
 
             // creating new service
-            child = create_child(&mut state, &state_path, &settings).await;
+            drop(child);
+            let mut child = create_child(&mut state, &state_path, &settings).await;
             child.monitor_stdx().await;
             child.monitor_usage().await;
             log!(LogLevel::Info, "New child process spawned.");

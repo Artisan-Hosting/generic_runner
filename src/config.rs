@@ -165,7 +165,7 @@ impl AppSpecificConfig {
     }
 
     /// Converts ignored_subdirs strings into PathType objects relative to the monitor_path
-    pub fn ignored_paths(&self) -> Option<Vec<PathType>> {
+    pub fn ignored_paths(&self) -> Vec<PathType> {
         let base_path = self.safe_path(); // Canonicalize the monitor path
 
         let sub_dirs: Vec<PathType> = self
@@ -175,10 +175,10 @@ impl AppSpecificConfig {
             .collect();
 
         if sub_dirs.is_empty() {
-            return None;
+            return Vec::new();
         }
 
-        return Some(sub_dirs);
+        return sub_dirs;
     }
 }
 
