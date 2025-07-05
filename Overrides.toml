@@ -1,2 +1,2 @@
-debug_mode = false
-log_level = "Info"
+debug_mode = true
+log_level = "Trace"

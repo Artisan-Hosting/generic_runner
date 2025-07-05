@@ -296,7 +296,7 @@ async fn main() {
                 },
                 Err(err) => {
                     log!(LogLevel::Error, "{}", err);
-                    eprintln!("We hit the timeout while gracefully shutting down. You might have to run systemctl kill ais_xxx to ensure you start correctly nextime");
+                    log!(LogLevel::Error, "We hit the timeout while gracefully shutting down. You might have to run systemctl kill ais_xxx to ensure you start correctly nextime");
                     log_error(
                         &mut state,
                         ErrorArrayItem::new(Errors::TimedOut, err.to_string()),
