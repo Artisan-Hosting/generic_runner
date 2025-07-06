@@ -1,8 +1,10 @@
+//! Utilities for spawning and monitoring child processes.
+
 use artisan_middleware::dusa_collection_utils::core::errors::Errors;
 use artisan_middleware::dusa_collection_utils::core::functions::current_timestamp;
 use artisan_middleware::dusa_collection_utils::log;
 use artisan_middleware::process_manager::{
-    spawn_complex_process, spawn_simple_process, SupervisedChild,
+    SupervisedChild, spawn_complex_process, spawn_simple_process,
 };
 use artisan_middleware::state_persistence::{log_error, update_state, wind_down_state};
 use artisan_middleware::{
@@ -18,6 +20,10 @@ use tokio::process::Command;
 
 use crate::config::AppSpecificConfig;
 
+/// Spawn the main child process defined in [`AppSpecificConfig`].
+///
+/// The spawned process is wrapped in [`SupervisedChild`] so that
+/// stdout/stderr and metrics can be monitored.
 pub async fn create_child(
     mut state: &mut AppState,
     state_path: &PathType,
@@ -88,6 +94,9 @@ pub async fn create_child(
     }
 }
 
+/// Execute the optional build command defined in the configuration.
+///
+/// Any output produced by the process is stored in the [`AppState`] buffers.
 pub async fn run_one_shot_process(
     settings: &AppSpecificConfig,
     state: &mut AppState,
@@ -164,7 +173,10 @@ pub async fn run_one_shot_process(
     }
 }
 
-// Sometimes we need a lil npm install
+/// Optionally run an install command before building the project.
+///
+/// This is useful for fetching dependencies such as `npm install` prior to
+/// spawning the main child process.
 pub async fn run_install_process(
     settings: &AppSpecificConfig,
     state: &mut AppState,

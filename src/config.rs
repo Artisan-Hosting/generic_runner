@@ -1,3 +1,9 @@
+//! Configuration handling utilities.
+//!
+//! Provides helpers for loading the main [`AppConfig`], reading additional
+//! application specific configuration and generating the persisted
+//! [`AppState`].
+
 use artisan_middleware::{
     aggregator::Status,
     config::AppConfig,
@@ -6,20 +12,22 @@ use artisan_middleware::{
         core::types::stringy::Stringy,
         core::version::{SoftwareVersion, Version, VersionCode},
     },
-    state_persistence::{update_state, AppState, StatePersistence},
+    state_persistence::{AppState, StatePersistence, update_state},
     timestamp::current_timestamp,
     version::{aml_version, str_to_version},
 };
 use colored::Colorize;
 use config::{Config, ConfigError, File};
 use dusa_collection_utils::{
-    core::logger::{set_log_level, LogLevel},
+    core::logger::{LogLevel, set_log_level},
     core::types::pathtype::PathType,
     log,
 };
 use serde::Deserialize;
 use std::fmt;
 
+/// Load the base [`AppConfig`] and populate fields derived from Cargo
+/// environment variables.
 pub fn get_config() -> AppConfig {
     let mut config: AppConfig = match AppConfig::new() {
         Ok(loaded_data) => loaded_data,
@@ -33,6 +41,8 @@ pub fn get_config() -> AppConfig {
     config
 }
 
+/// Load the previous [`AppState`] from disk if present, otherwise create a new
+/// state structure using the provided configuration.
 pub async fn generate_application_state(state_path: &PathType, config: &AppConfig) -> AppState {
     match StatePersistence::load_state(&state_path).await {
         Ok(mut loaded_data) => {
@@ -94,6 +104,7 @@ pub async fn generate_application_state(state_path: &PathType, config: &AppConfi
     }
 }
 
+/// Read additional application specific configuration from `Config.toml`.
 pub fn specific_config() -> Result<AppSpecificConfig, ConfigError> {
     let mut builder = Config::builder();
     builder = builder.add_source(File::with_name("Config").required(false));
@@ -104,6 +115,7 @@ pub fn specific_config() -> Result<AppSpecificConfig, ConfigError> {
     Ok(app_specific)
 }
 
+/// Configuration section located under `[app_specific]` in `Config.toml`.
 #[derive(Debug, Deserialize, Clone)]
 pub struct AppSpecificConfig {
     pub interval_seconds: u32,

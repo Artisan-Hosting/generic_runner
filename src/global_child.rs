@@ -1,3 +1,8 @@
+//! Global handles to the running child process and directory monitor.
+//!
+//! These are wrapped in [`Arc`] and [`Mutex`] so that various tasks in the
+//! application can access the latest child or monitor instance.
+
 use artisan_middleware::process_manager::SupervisedChild;
 use dir_watcher::RawFileMonitor;
 use once_cell::sync::Lazy;
