@@ -1,7 +1,10 @@
-use crate::global_child::{
-    init_child, init_monitor, replace_child, GLOBAL_CHILD,
-    GLOBAL_MONITOR,
-};
+//! Executable entrypoint for the process manager.
+//!
+//! This binary spawns a supervised child process, monitors a directory for
+//! changes and restarts the child when necessary.  High level state is
+//! persisted across restarts using [`AppState`].
+
+use crate::global_child::{GLOBAL_CHILD, GLOBAL_MONITOR, init_child, init_monitor, replace_child};
 use artisan_middleware::{
     aggregator::Status,
     config::AppConfig,
@@ -10,7 +13,7 @@ use artisan_middleware::{
         core::logger::{get_log_level, set_log_level},
     },
     process_manager::SupervisedChild,
-    state_persistence::{log_error, update_state, wind_down_state, AppState, StatePersistence},
+    state_persistence::{AppState, StatePersistence, log_error, update_state, wind_down_state},
 };
 use child::{create_child, run_install_process, run_one_shot_process};
 use config::{generate_application_state, get_config, specific_config};
@@ -25,8 +28,8 @@ use dusa_collection_utils::{
 use signals::{sighup_watch, sigusr_watch};
 use std::{
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc,
+        atomic::{AtomicBool, Ordering},
     },
     time::Duration,
 };
@@ -36,6 +39,10 @@ mod child;
 mod config;
 mod global_child;
 mod signals;
+
+/// Application entrypoint.
+///
+/// Initializes configuration, loads any persisted state and then enters the monitoring loop.
 
 #[tokio::main]
 async fn main() {
@@ -381,7 +388,10 @@ async fn main() {
                 },
                 Err(err) => {
                     log!(LogLevel::Error, "{}", err);
-                    log!(LogLevel::Error, "We hit the timeout while gracefully shutting down. You might have to run systemctl kill ais_xxx to ensure you start correctly nextime");
+                    log!(
+                        LogLevel::Error,
+                        "We hit the timeout while gracefully shutting down. You might have to run systemctl kill ais_xxx to ensure you start correctly nextime"
+                    );
                     log_error(
                         &mut state,
                         ErrorArrayItem::new(Errors::TimedOut, err.to_string()),
