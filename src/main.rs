@@ -243,15 +243,13 @@ async fn main() {
                         };
 
                         if !current_std_out.is_empty() {
-                            let mut state_stdout = state.stdout.clone();
-                            let unique_values: Vec<&mut (u64, String)> = state_stdout.iter_mut().filter(|value| {
-                                !current_std_out.contains(value)
-                            }).collect();
+                            let new_values: Vec<(u64, String)> = current_std_out
+                                .into_iter()
+                                .filter(|val| !state.stdout.contains(val))
+                                .collect();
 
-                            for value in unique_values {
-                                state.stdout.push((value.0, value.1.clone()));
-                            }
-
+                            state.stdout.extend(new_values);
+                            state.stdout.sort_by_key(|val| val.0);
                             state.stdout.dedup();
                         }
                     }
@@ -264,15 +262,13 @@ async fn main() {
                         };
 
                         if !current_std_err.is_empty() {
-                            let mut state_stderr = state.stderr.clone();
-                            let unique_values: Vec<&mut (u64, String)> = state_stderr.iter_mut().filter(|value| {
-                                !current_std_err.contains(value)
-                            }).collect();
+                            let new_values: Vec<(u64, String)> = current_std_err
+                                .into_iter()
+                                .filter(|val| !state.stderr.contains(val))
+                                .collect();
 
-                            for value in unique_values {
-                                state.stderr.push((value.0, value.1.clone()));
-                            }
-
+                            state.stderr.extend(new_values);
+                            state.stderr.sort_by_key(|val| val.0);
                             state.stderr.dedup();
                         }
                     }
