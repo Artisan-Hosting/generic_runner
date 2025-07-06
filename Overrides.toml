@@ -1,2 +1,2 @@
-debug_mode = true
+debug_mode = false
 log_level = "Debug"

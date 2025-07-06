@@ -11,8 +11,8 @@ use artisan_middleware::{
     },
     state_persistence::AppState,
 };
-use std::fs;
 use shell_words::split;
+use std::fs;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 
@@ -25,7 +25,13 @@ pub async fn create_child(
 ) -> SupervisedChild {
     log!(LogLevel::Trace, "Creating child process...");
 
-    let parts = split(&settings.run_command).unwrap_or_else(|_| settings.run_command.split_whitespace().map(|s| s.to_string()).collect());
+    let parts = split(&settings.run_command).unwrap_or_else(|_| {
+        settings
+            .run_command
+            .split_whitespace()
+            .map(|s| s.to_string())
+            .collect()
+    });
     let mut iter = parts.into_iter();
     let program = iter.next().unwrap();
     let mut command: Command = Command::new(program);
@@ -90,19 +96,27 @@ pub async fn run_one_shot_process(
     let build_cmd = match &settings.build_command {
         Some(cmd) => cmd,
         None => {
-            log!(LogLevel::Info, "No build command specified, skipping build step");
+            log!(
+                LogLevel::Info,
+                "No build command specified, skipping build step"
+            );
             return Ok(());
         }
     };
 
-    let parts = split(build_cmd).unwrap_or_else(|_| build_cmd.split_whitespace().map(|s| s.to_string()).collect());
+    let parts = split(build_cmd).unwrap_or_else(|_| {
+        build_cmd
+            .split_whitespace()
+            .map(|s| s.to_string())
+            .collect()
+    });
     let mut iter = parts.into_iter();
     let program = match iter.next() {
         Some(p) => p,
         None => {
             log!(LogLevel::Warn, "Exting build pre-maturly");
-            return Ok(())
-        },
+            return Ok(());
+        }
     };
 
     let mut command = Command::new(program);
@@ -110,14 +124,9 @@ pub async fn run_one_shot_process(
         command.arg(arg);
     }
 
-    let mut process = spawn_simple_process(
-        &mut command,
-        true,
-        state,
-        state_path,
-    )
-    .await
-    .map_err(ErrorArrayItem::from)?;
+    let mut process = spawn_simple_process(&mut command, true, state, state_path)
+        .await
+        .map_err(ErrorArrayItem::from)?;
 
     if let Some(std) = process.stdout.take() {
         let buffer = BufReader::new(std);
@@ -164,12 +173,20 @@ pub async fn run_install_process(
     let install_cmd = match &settings.install_command {
         Some(cmd) => cmd,
         None => {
-            log!(LogLevel::Info, "No install command specified, skipping install step");
+            log!(
+                LogLevel::Info,
+                "No install command specified, skipping install step"
+            );
             return Ok(());
         }
     };
 
-    let parts = split(install_cmd).unwrap_or_else(|_| install_cmd.split_whitespace().map(|s| s.to_string()).collect());
+    let parts = split(install_cmd).unwrap_or_else(|_| {
+        install_cmd
+            .split_whitespace()
+            .map(|s| s.to_string())
+            .collect()
+    });
     let mut iter = parts.into_iter();
     let program = match iter.next() {
         Some(p) => p,
@@ -181,14 +198,9 @@ pub async fn run_install_process(
         command.arg(arg);
     }
 
-    let mut process = spawn_simple_process(
-        &mut command,
-        true,
-        state,
-        state_path,
-    )
-    .await
-    .map_err(ErrorArrayItem::from)?;
+    let mut process = spawn_simple_process(&mut command, true, state, state_path)
+        .await
+        .map_err(ErrorArrayItem::from)?;
 
     if let Some(std) = process.stdout.take() {
         let buffer = BufReader::new(std);

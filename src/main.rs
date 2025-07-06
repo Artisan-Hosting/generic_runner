@@ -1,4 +1,7 @@
-use crate::global_child::{get_event_reciver, init_child, init_monitor, replace_child, replace_monitor, GLOBAL_CHILD, GLOBAL_MONITOR};
+use crate::global_child::{
+    init_child, init_monitor, replace_child, GLOBAL_CHILD,
+    GLOBAL_MONITOR,
+};
 use artisan_middleware::{
     aggregator::Status,
     config::AppConfig,
@@ -11,11 +14,8 @@ use artisan_middleware::{
 };
 use child::{create_child, run_install_process, run_one_shot_process};
 use config::{generate_application_state, get_config, specific_config};
-use dir_watcher::{
-    object::{MonitorMode, RawFileMonitor, RecursiveMode},
-    options::Options,
-};
 
+use dir_watcher::{MonitorMode, Options, RawFileMonitor, RecursiveMode};
 use dusa_collection_utils::{
     core::errors::{ErrorArrayItem, Errors},
     core::logger::LogLevel,
@@ -30,7 +30,7 @@ use std::{
     },
     time::Duration,
 };
-use tokio::time::{sleep, timeout};
+use tokio::time::timeout;
 
 mod child;
 mod config;
@@ -131,24 +131,35 @@ async fn main() {
     let monitor: RawFileMonitor = RawFileMonitor::new(options.clone()).await;
     monitor.start().await;
 
-    let mut event_rx = match get_event_reciver().await {
-        Ok(recv) => recv,
-        Err(_) => {
-            log!(LogLevel::Warn, "File monitor in a weird state, re-initializing"); 
-            let monitor: RawFileMonitor = RawFileMonitor::new(options).await;
-            replace_monitor(monitor).await;
-            match get_event_reciver().await {
-                Ok(recv) => recv,
-                Err(_) => {
-                    log_error(&mut state, ErrorArrayItem::new(Errors::GeneralError, "Failed to start folder monitor"), &state_path).await;
-                    wind_down_state(&mut state, &state_path).await;
-                    std::process::exit(100);
-                },
-            }
-        },
+    // let mut event_rx = match get_event_reciver().await {
+    //     Ok(recv) => recv,
+    //     Err(_) => {
+    //         log!(LogLevel::Warn, "File monitor in a weird state, re-initializing");
+    //         let monitor: RawFileMonitor = RawFileMonitor::new(options).await;
+    //         replace_monitor(monitor).await;
+    //         match get_event_reciver().await {
+    //             Ok(recv) => recv,
+    //             Err(_) => {
+    //                 log_error(&mut state, ErrorArrayItem::new(Errors::GeneralError, "Failed to start folder monitor"), &state_path).await;
+    //                 wind_down_state(&mut state, &state_path).await;
+    //                 std::process::exit(100);
+    //             },
+    //         }
+    //     },
+    // };
+
+    let mut event_rx = match monitor.subscribe().await {
+        Some(rx) => rx,
+        None => {
+            log!(LogLevel::Error, "Failed to subscribe to the dir monitor");
+            state.error_log.push(ErrorArrayItem::new(
+                Errors::GeneralError,
+                "Failed to subscribe to the dir monitor",
+            ));
+            wind_down_state(&mut state, &state_path).await;
+            std::process::exit(100);
+        }
     };
-
-
 
     init_monitor(monitor).await;
 
@@ -165,7 +176,7 @@ async fn main() {
 
                 if change_count >= trigger_count {
                     if let Some(monitor) = GLOBAL_MONITOR.lock().await.as_mut() {
-                        monitor.stop();
+                        monitor.pause();
                     }
 
                     // monitor;
@@ -182,10 +193,14 @@ async fn main() {
                         }
                     }
 
-                    { // This coupled with kill_on_drop ensures that even if we don't properly kill the application it get's nuked
-                        let mut _raw_child = GLOBAL_CHILD.lock().await.as_mut();
-                        _raw_child = None;
-                        sleep(Duration::from_secs(1)).await;
+                    // { // This coupled with kill_on_drop ensures that even if we don't properly kill the application it get's nuked
+                    //     let mut _raw_child = GLOBAL_CHILD.lock().await.as_mut();
+                    //     _raw_child = None;
+                    //     sleep(Duration::from_millis(20)).await;
+                    // }
+
+                    if !child.running().await {
+                        log!(LogLevel::Info, "Killed the child!");
                     }
 
                     // Spawn child process
@@ -205,35 +220,72 @@ async fn main() {
                         child.monitor_usage().await;
                     };
 
-                    change_count = 0; // Reset count
                     if let Some(monitor) = GLOBAL_MONITOR.lock().await.as_mut() {
-                        monitor.start().await;
+                        monitor.resume();
                     }
+                    change_count = 0; // Reset count
                 }
             }
             _ = tokio::time::sleep(Duration::from_secs(5)) => {
                 log!(LogLevel::Trace, "Periodic task triggered - checking child process status...");
 
-                // Getting the stds out
-                match child.get_std_out().await {
-                    Ok(mut stdvec) => {
-                        state.stdout.append(&mut stdvec);
-                    },
-                    Err(err) => {
-                        log!(LogLevel::Error, "Failed to get standart out: {}", err.err_mesg)
-                    },
+                let mut respawn_child = false;
+
+                // Getting stds from child and cheking it's pulse
+                if let Some(child) = GLOBAL_CHILD.lock().await.as_mut() {
+                    // Getting the stds out
+
+                    { // Standard Out
+                        let current_std_out = if let Ok(stdout) = child.get_std_out().await {
+                            stdout
+                        } else {
+                            Vec::new()
+                        };
+
+                        if !current_std_out.is_empty() {
+                            let mut state_stdout = state.stdout.clone();
+                            let unique_values: Vec<&mut (u64, String)> = state_stdout.iter_mut().filter(|value| {
+                                !current_std_out.contains(value)
+                            }).collect();
+
+                            for value in unique_values {
+                                state.stdout.push((value.0, value.1.clone()));
+                            }
+
+                            state.stdout.dedup();
+                        }
+                    }
+
+                    { // Standard Err
+                        let current_std_err = if let Ok(stderr) = child.get_std_err().await {
+                            stderr
+                        } else {
+                            Vec::new()
+                        };
+
+                        if !current_std_err.is_empty() {
+                            let mut state_stderr = state.stderr.clone();
+                            let unique_values: Vec<&mut (u64, String)> = state_stderr.iter_mut().filter(|value| {
+                                !current_std_err.contains(value)
+                            }).collect();
+
+                            for value in unique_values {
+                                state.stderr.push((value.0, value.1.clone()));
+                            }
+
+                            state.stderr.dedup();
+                        }
+                    }
+
+                    if !child.running().await {
+                        respawn_child = true;
+                    }
+                } else {
+                    log!(LogLevel::Warn, "Failed to lock child for periodic checks skipping");
                 }
 
-                match child.get_std_err().await {
-                    Ok(mut errvec) => {
-                        state.stderr.append(&mut errvec);
-                    },
-                    Err(err) => {
-                        log!(LogLevel::Error, "Failed to get standart error: {}", err.err_mesg)
-                    },
-                }
-
-                if !child.running().await {
+                // Handling re-spawning child.
+                if respawn_child {
                     log!(LogLevel::Warn, "Child process {:?} is not running. Restarting...", child.get_pid().await);
 
                     if let Ok(_) = child.kill().await {
@@ -255,38 +307,38 @@ async fn main() {
                         child.monitor_stdx().await;
                         child.monitor_usage().await;
                     };
-                    let message = "New child process spawned";
 
+                    // logging
+                    let message = "New child process spawned";
                     log!(LogLevel::Info, "{message}");
                     state.data = message.to_string();
                     state.status = Status::Running;
                     update_state(&mut state, &state_path, None).await;
                 }
 
-                // this is just a trimming function to limit the upstream communications
-                if state.error_log.len() >= 3 { // * Change this limit dependent on the project
+
+                // Cleaning up the state file
+                state.error_log.dedup();
+                if state.error_log.len() >= 5 {
                     state.error_log.remove(0);
-                    state.error_log.dedup();
                 }
 
-                // Update state as needed
-                state.data = String::from("Nominal");
-                if let Ok(metrics) = child.get_metrics().await {
-                    // Ensuring we are within the specified limits
-                    if metrics.memory_usage >= state.config.max_ram_usage as f64 {
-                        state.error_log.push(ErrorArrayItem::new(Errors::OverRamLimit, "Application has exceeded ram limit"))
+                { // Collecting metrics data to add to state
+                    state.data = String::from("Nominal");
+                    if let Ok(metrics) = child.get_metrics().await {
+                        // Ensuring we are within the specified limits
+                        if metrics.memory_usage >= state.config.max_ram_usage as f64 {
+                            state.error_log.push(ErrorArrayItem::new(Errors::OverRamLimit, "Application has exceeded ram limit"))
+                        }
+                        state.status = Status::Running;
+                        update_state(&mut state, &state_path, Some(metrics)).await;
+                    } else {
+                        state.data = String::from("Failed to get metric data");
+                        state.error_log.push(ErrorArrayItem::new(Errors::GeneralError, "Failed to get metric data from the child"));
+                        state.status = Status::Warning;
+                        update_state(&mut state, &state_path, None).await;
                     }
-
-                    state.status = Status::Running;
-                    update_state(&mut state, &state_path, Some(metrics)).await;
-                } else {
-                    state.data = String::from("Failed to get metric data");
-                    state.error_log.push(ErrorArrayItem::new(Errors::GeneralError, "Failed to get metric data from the child"));
-                    state.status = Status::Warning;
-                    update_state(&mut state, &state_path, None).await;
                 }
-
-
             }
 
             _ = tokio::signal::ctrl_c() => {
