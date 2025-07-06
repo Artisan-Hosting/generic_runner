@@ -70,3 +70,50 @@ async fn update_state_increments_counter() {
     assert_eq!(state.event_counter, prev_counter + 1);
     assert!(state.last_updated >= prev_timestamp);
 }
+
+#[tokio::test]
+async fn dedup_stdout_entries() {
+    let dir = tempdir().unwrap();
+    let settings = AppSpecificConfig {
+        interval_seconds: 1,
+        monitor_path: dir.path().to_str().unwrap().to_string(),
+        project_path: dir.path().to_str().unwrap().to_string(),
+        changes_needed: 1,
+        ignored_subdirs: vec![],
+        install_command: None,
+        build_command: None,
+        run_command: "sh -c 'echo hello'".to_string(),
+    };
+    let config = AppConfig::dummy();
+    let state_path = StatePersistence::get_state_path(&config);
+    let mut state = generate_application_state(&state_path, &config).await;
+
+    let mut child = create_child(&mut state, &state_path, &settings).await;
+    sleep(Duration::from_millis(200)).await;
+
+    // First retrieval
+    let out_first = child.get_std_out().await.unwrap();
+    let new_values: Vec<(u64, String)> = out_first
+        .clone()
+        .into_iter()
+        .filter(|val| !state.stdout.contains(val))
+        .collect();
+    state.stdout.extend(new_values);
+    state.stdout.sort_by_key(|val| val.0);
+    state.stdout.dedup();
+
+    // Second retrieval should not duplicate lines
+    let out_second = child.get_std_out().await.unwrap();
+    let new_values: Vec<(u64, String)> = out_second
+        .clone()
+        .into_iter()
+        .filter(|val| !state.stdout.contains(val))
+        .collect();
+    state.stdout.extend(new_values);
+    state.stdout.sort_by_key(|val| val.0);
+    state.stdout.dedup();
+
+    child.kill().await.ok();
+
+    assert_eq!(state.stdout.len(), out_first.len());
+}
