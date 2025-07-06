@@ -4,7 +4,7 @@ version = "2.0.0"
 edition = "2024"
 
 [dependencies]
-artisan_middleware = { path = "/home/dwhitfield/Developer/Artisan_Hosting/Libraries/artisan_lib" }
+artisan_middleware = { path = "/opt/artisan/lib/artisan_lib" }
 #artisan_middleware = { git = "https://github.com/Artisan-Hosting/artisan_lib.git", branch = "stable" }
 config = "0.14.0"
 serde = "1.0.210"
