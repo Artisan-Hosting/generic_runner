@@ -1,11 +1,11 @@
 [package]
 name = "ais_runner"
-version = "1.0.0"
-edition = "2021"
+version = "2.0.0"
+edition = "2024"
 
 [dependencies]
-artisan_middleware = "^5.4.0"
 #artisan_middleware = { path = "/home/dwhitfield/Developer/Artisan_Hosting/Libraries/artisan_lib" }
+artisan_middleware = { git = "https://github.com/Artisan-Hosting/artisan_lib.git", branch = "stable" }
 config = "0.14.0"
 serde = "1.0.210"
 serde_json = "1.0.128"
@@ -16,7 +16,6 @@ tokio = "1.40.0"
 rng = "0.1.0"
 rand = "0.8.5"
 colored = "2.1.0"
-# notify = "6.1.1"
 nix = "0.29.0"
 signal-hook = "0.3.17"
 shell-words = "1.1.0"

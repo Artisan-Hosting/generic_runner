@@ -1,5 +1,5 @@
 [app_specific]
-interval_seconds = "30"
+interval_seconds = "1"
 monitor_path = "/home/dwhitfield/Developer/GIT/Mitobyte"
 project_path = "/home/dwhitfield/Developer/GIT/Mitobyte"
 changes_needed = "2"

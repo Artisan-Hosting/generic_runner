@@ -30,7 +30,7 @@ use std::{
     },
     time::Duration,
 };
-use tokio::time::timeout;
+use tokio::time::{sleep, timeout};
 
 mod child;
 mod config;
@@ -131,23 +131,6 @@ async fn main() {
     let monitor: RawFileMonitor = RawFileMonitor::new(options.clone()).await;
     monitor.start().await;
 
-    // let mut event_rx = match get_event_reciver().await {
-    //     Ok(recv) => recv,
-    //     Err(_) => {
-    //         log!(LogLevel::Warn, "File monitor in a weird state, re-initializing");
-    //         let monitor: RawFileMonitor = RawFileMonitor::new(options).await;
-    //         replace_monitor(monitor).await;
-    //         match get_event_reciver().await {
-    //             Ok(recv) => recv,
-    //             Err(_) => {
-    //                 log_error(&mut state, ErrorArrayItem::new(Errors::GeneralError, "Failed to start folder monitor"), &state_path).await;
-    //                 wind_down_state(&mut state, &state_path).await;
-    //                 std::process::exit(100);
-    //             },
-    //         }
-    //     },
-    // };
-
     let mut event_rx = match monitor.subscribe().await {
         Some(rx) => rx,
         None => {
@@ -168,7 +151,7 @@ async fn main() {
     update_state(&mut state, &state_path, None).await;
     loop {
         tokio::select! {
-            Ok(event) = event_rx.recv() => {
+            Some(event) = event_rx.recv() => {
                 log!(LogLevel::Trace, "Received directory change event: {:?}", event);
                 change_count += 1;
                 log!(LogLevel::Info, "Change detected: {} out of {}", change_count, trigger_count);
@@ -184,7 +167,6 @@ async fn main() {
                     state.event_counter += 1;
                     state.status = Status::Building;
                     update_state(&mut state, &state_path, None).await;
-                    log!(LogLevel::Info, "Killing the child");
 
                     if let Some(child) = GLOBAL_CHILD.lock().await.as_mut() {
                         if let Err(err) = child.kill().await {
@@ -193,11 +175,11 @@ async fn main() {
                         }
                     }
 
-                    // { // This coupled with kill_on_drop ensures that even if we don't properly kill the application it get's nuked
-                    //     let mut _raw_child = GLOBAL_CHILD.lock().await.as_mut();
-                    //     _raw_child = None;
-                    //     sleep(Duration::from_millis(20)).await;
-                    // }
+                    { // This coupled with kill_on_drop ensures that even if we don't properly kill the application it get's nuked
+                        let mut _raw_child = GLOBAL_CHILD.lock().await.as_mut();
+                        _raw_child = None;
+                        sleep(Duration::from_millis(20)).await;
+                    }
 
                     if !child.running().await {
                         log!(LogLevel::Info, "Killed the child!");
