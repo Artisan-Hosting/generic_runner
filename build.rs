@@ -1,5 +1,5 @@
 // build.rs
-use std::env;
+use std::{env, fs};
 use std::path::Path;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -24,5 +24,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             &[proto_root.to_str().unwrap()],
         )?;
 
+    // Copy files to the out dir
+    let binding = env::var("OUT_DIR")?;
+    let out_dir = Path::new(&binding);
+    let generated = Path::new("src/secrets/secret_service.rs");
+    let dest = out_dir.join("secret_service.rs");
+    fs::copy(generated, dest)?;
+    
     Ok(())
 }
