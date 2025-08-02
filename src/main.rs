@@ -39,6 +39,7 @@ mod child;
 mod config;
 mod global_child;
 mod signals;
+mod secrets;
 
 /// Application entrypoint.
 ///
