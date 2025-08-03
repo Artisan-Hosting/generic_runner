@@ -5,11 +5,9 @@
 //! persisted across restarts using [`AppState`].
 
 use crate::{
-    global_child::{
-        GLOBAL_CHILD, GLOBAL_CLINENT_CONNECTION, GLOBAL_MONITOR, get_query, init_child,
-        init_monitor, replace_child,
-    },
-    secrets::{SecretClient, SecretQuery},
+    config::{default_env_location, default_secret_server}, global_child::{
+        get_query, init_child, init_monitor, replace_child, GLOBAL_CHILD, GLOBAL_CLINENT_CONNECTION, GLOBAL_MONITOR
+    }, secrets::{SecretClient, SecretQuery}
 };
 use artisan_middleware::{
     aggregator::Status,
@@ -102,6 +100,11 @@ async fn main() {
 
     // requesting enviornment data
     let env_path: PathType = PathType::Content(settings.env_file_location.clone());
+    let env_dummy: PathType = PathType::Content(default_env_location());
+    if env_dummy == env_path {
+        log!(LogLevel::Warn, "No env file location specified skipping...");
+        return;
+    }
     _ = env_path.delete();
 
     let query: SecretQuery = match get_query() {
@@ -111,6 +114,11 @@ async fn main() {
             std::process::exit(0)
         }
     };
+
+    if &settings.secret_server_addr == &default_secret_server() {
+        log!(LogLevel::Warn, "No secret server address defined, skipping ...");
+        return
+    }
 
     let client = match SecretClient::connect(&settings.secret_server_addr).await {
         Ok(c) => c,

@@ -152,7 +152,9 @@ pub struct AppSpecificConfig {
     #[serde(default)]
     pub build_command: Option<String>,
     pub run_command: String,
+    #[serde(default = "default_secret_server")]
     pub secret_server_addr: String,
+    #[serde(default = "default_env_location")]
     pub env_file_location: String,
 }
 
@@ -254,3 +256,6 @@ impl fmt::Display for AppSpecificConfig {
         )
     }
 }
+
+pub fn default_secret_server() -> String { String::from("localhost:50051") }
+pub fn default_env_location() -> String { String::from("/tmp/.trash") }
