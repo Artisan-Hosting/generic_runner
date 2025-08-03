@@ -4,19 +4,29 @@
 //! changes and restarts the child when necessary.  High level state is
 //! persisted across restarts using [`AppState`].
 
-use crate::global_child::{GLOBAL_CHILD, GLOBAL_MONITOR, init_child, init_monitor, replace_child};
+use crate::{
+    global_child::{
+        GLOBAL_CHILD, GLOBAL_CLINENT_CONNECTION, GLOBAL_MONITOR, get_query, init_child,
+        init_monitor, replace_child,
+    },
+    secrets::{SecretClient, SecretQuery},
+};
 use artisan_middleware::{
     aggregator::Status,
     config::AppConfig,
     dusa_collection_utils::{
         self,
-        core::logger::{get_log_level, set_log_level},
+        core::{
+            errors::ErrorArray,
+            logger::{get_log_level, set_log_level},
+        },
     },
     process_manager::SupervisedChild,
     state_persistence::{AppState, StatePersistence, log_error, update_state, wind_down_state},
 };
 use child::{create_child, run_install_process, run_one_shot_process};
 use config::{generate_application_state, get_config, specific_config};
+use std::io::Write;
 
 use dir_watcher::{MonitorMode, Options, RawFileMonitor, RecursiveMode};
 use dusa_collection_utils::{
@@ -27,6 +37,7 @@ use dusa_collection_utils::{
 };
 use signals::{sighup_watch, sigusr_watch};
 use std::{
+    fs::OpenOptions,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -38,6 +49,7 @@ use tokio::time::{sleep, timeout};
 mod child;
 mod config;
 mod global_child;
+mod secrets;
 mod signals;
 
 /// Application entrypoint.
@@ -47,6 +59,8 @@ mod signals;
 #[tokio::main]
 async fn main() {
     // Initialization
+
+    // reading config files
     log!(LogLevel::Trace, "Initializing application...");
     let mut config: AppConfig = get_config();
     let state_path: PathType = StatePersistence::get_state_path(&config);
@@ -86,14 +100,99 @@ async fn main() {
         log!(LogLevel::Info, "Log Level: {}", config.log_level);
     }
 
+    // requesting enviornment data
+    let env_path: PathType = PathType::Content(settings.env_file_location.clone());
+    _ = env_path.delete();
+
+    let query: SecretQuery = match get_query() {
+        Ok(q) => q,
+        Err(_) => {
+            log!(LogLevel::Error, "Error loading env query");
+            std::process::exit(0)
+        }
+    };
+
+    let client = match SecretClient::connect(&settings.secret_server_addr).await {
+        Ok(c) => c,
+        Err(err) => {
+            log!(
+                LogLevel::Error,
+                "Error dialing secret server: {}",
+                err.to_string()
+            );
+            std::process::exit(0)
+        }
+    };
+
+    match query.get_all(client.clone()).await {
+        Ok(results) => {
+            if results.is_empty() {
+                log!(
+                    LogLevel::Debug,
+                    "No env data for current runtime: id: {} env: {}",
+                    query.runner_id,
+                    query.enviornment_id
+                );
+
+                return;
+            }
+
+            // formatting results to write
+            let mut lines: Vec<String> = Vec::new();
+            results.iter().for_each(|item| {
+                lines.push(format!("{}={}\n", item.0, str::from_utf8(&item.1).unwrap()));
+            });
+
+            // Opening file
+            let mut options = OpenOptions::new();
+            options.create_new(true);
+            let mut file = match options.open(env_path) {
+                Ok(file) => file,
+                Err(err) => {
+                    log!(
+                        LogLevel::Error,
+                        "Failed to open env file: {}",
+                        err.to_string()
+                    );
+                    std::process::exit(100);
+                }
+            };
+
+            // Writing
+            lines.iter().for_each(|line| {
+                if let Err(err) = write!(file, "{}", line) {
+                    log!(
+                        LogLevel::Warn,
+                        "Lines maybe missing from the env file: {}",
+                        err.to_string()
+                    )
+                }
+            });
+
+            // Closing file
+            _ = file.flush();
+        }
+        Err(err) => ErrorArray::from(err).display(true),
+    }
+
+    match GLOBAL_CLINENT_CONNECTION.try_lock() {
+        Ok(mut store) => *store = Some(client),
+        Err(err) => {
+            log!(
+                LogLevel::Error,
+                "Error storing secret server connection: {}",
+                err.to_string()
+            );
+            std::process::exit(0)
+        }
+    }
+
+    log!(LogLevel::Debug, "Copied secret data from the server");
+
     log!(LogLevel::Info, "{} Started", config.app_name);
-    log!(
-        LogLevel::Info,
-        "Directory Monitoring: {}",
-        settings.safe_path()
-    );
 
     state.status = Status::Building;
+    log!(LogLevel::Debug, "Application status: {}", state.status);
     update_state(&mut state, &state_path, None).await;
     if settings.install_command.is_some() {
         log!(LogLevel::Trace, "Running install step");
@@ -123,10 +222,11 @@ async fn main() {
     let mut change_count = 0;
     let trigger_count = settings.changes_needed;
     state.status = Status::Running;
+    log!(LogLevel::Debug, "Application status: {}", state.status);
     update_state(&mut state, &state_path, None).await;
 
     // Start monitoring the directory and get the asynchronous receiver
-    log!(LogLevel::Trace, "Starting directory monitoring...");
+    log!(LogLevel::Debug, "Starting directory monitoring...");
     let options: Options = Options::default()
         .set_mode(RecursiveMode::Recursive)
         .set_monitor_mode(MonitorMode::Modify)
@@ -173,6 +273,7 @@ async fn main() {
                     log!(LogLevel::Info, "Reached {} changes, handling event", trigger_count);
                     state.event_counter += 1;
                     state.status = Status::Building;
+                    log!(LogLevel::Debug, "Application status: {}", state.status);
                     update_state(&mut state, &state_path, None).await;
 
                     if let Some(child) = GLOBAL_CHILD.lock().await.as_mut() {
@@ -212,7 +313,10 @@ async fn main() {
                     if let Some(monitor) = GLOBAL_MONITOR.lock().await.as_mut() {
                         monitor.resume();
                     }
+
                     change_count = 0; // Reset count
+                    state.status = Status::Running;
+                    log!(LogLevel::Debug, "Application status: {}", state.status);
                 }
             }
             _ = tokio::time::sleep(Duration::from_secs(5)) => {
@@ -298,6 +402,7 @@ async fn main() {
                     log!(LogLevel::Info, "{message}");
                     state.data = message.to_string();
                     state.status = Status::Running;
+                    log!(LogLevel::Debug, "Application status: {}", state.status);
                     update_state(&mut state, &state_path, None).await;
                 }
 
@@ -316,11 +421,13 @@ async fn main() {
                             state.error_log.push(ErrorArrayItem::new(Errors::OverRamLimit, "Application has exceeded ram limit"))
                         }
                         state.status = Status::Running;
+                        log!(LogLevel::Debug, "Application status: {}", state.status);
                         update_state(&mut state, &state_path, Some(metrics)).await;
                     } else {
                         state.data = String::from("Failed to get metric data");
                         state.error_log.push(ErrorArrayItem::new(Errors::GeneralError, "Failed to get metric data from the child"));
                         state.status = Status::Warning;
+                        log!(LogLevel::Debug, "Application status: {}", state.status);
                         update_state(&mut state, &state_path, None).await;
                     }
                 }
@@ -334,6 +441,8 @@ async fn main() {
 
         if reload.load(Ordering::Relaxed) {
             log!(LogLevel::Debug, "Reloading");
+            state.status = Status::Idle;
+            log!(LogLevel::Debug, "Application status: {}", state.status);
 
             // reload config file
             config = get_config();
@@ -367,6 +476,8 @@ async fn main() {
 
             log!(LogLevel::Info, "New child process spawned.");
             reload.store(false, Ordering::Relaxed);
+            state.status = Status::Running;
+            log!(LogLevel::Debug, "Application status: {}", state.status);
         }
 
         if exit_graceful.load(Ordering::Relaxed) {

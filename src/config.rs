@@ -26,6 +26,8 @@ use dusa_collection_utils::{
 use serde::Deserialize;
 use std::fmt;
 
+use crate::{global_child::GLOBAL_SECRET_QUERY, secrets::SecretQuery};
+
 /// Load the base [`AppConfig`] and populate fields derived from Cargo
 /// environment variables.
 pub fn get_config() -> AppConfig {
@@ -50,6 +52,7 @@ pub async fn generate_application_state(state_path: &PathType, config: &AppConfi
             log!(LogLevel::Trace, "Previous state data: {:#?}", loaded_data);
             loaded_data.data = String::from("Initializing");
             loaded_data.config.debug_mode = config.debug_mode;
+            loaded_data.config.environment = config.environment.clone();
             loaded_data.last_updated = current_timestamp();
             loaded_data.config.log_level = config.log_level;
             loaded_data.status = Status::Starting;
@@ -60,6 +63,17 @@ pub async fn generate_application_state(state_path: &PathType, config: &AppConfi
             set_log_level(loaded_data.config.log_level);
             loaded_data.error_log.clear();
             update_state(&mut loaded_data, &state_path, None).await;
+
+            {
+                // creating query
+                let query: SecretQuery = SecretQuery::new(
+                    config.app_name.to_string().replace("ais_", ""),
+                    config.environment.clone(),
+                    None,
+                );
+                _ = GLOBAL_SECRET_QUERY.set(query);
+            }
+
             loaded_data
         }
         Err(e) => {
@@ -99,6 +113,16 @@ pub async fn generate_application_state(state_path: &PathType, config: &AppConfi
             state.error_log.clear();
             update_state(&mut state, &state_path, None).await;
 
+            {
+                // creating query
+                let query: SecretQuery = SecretQuery::new(
+                    config.app_name.to_string().replace("ais_", ""),
+                    config.environment.clone(),
+                    None,
+                );
+                _ = GLOBAL_SECRET_QUERY.set(query);
+            }
+
             state
         }
     }
@@ -128,6 +152,8 @@ pub struct AppSpecificConfig {
     #[serde(default)]
     pub build_command: Option<String>,
     pub run_command: String,
+    pub secret_server_addr: String,
+    pub env_file_location: String,
 }
 
 #[allow(dead_code)]
