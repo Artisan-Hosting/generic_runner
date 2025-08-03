@@ -4,16 +4,22 @@
 //! changes and restarts the child when necessary.  High level state is
 //! persisted across restarts using [`AppState`].
 
-use crate::global_child::{GLOBAL_CHILD, GLOBAL_MONITOR, init_child, init_monitor, replace_child};
+use crate::{
+    global_child::{
+        GLOBAL_CHILD, GLOBAL_CLINENT_CONNECTION, GLOBAL_MONITOR, get_query, init_child,
+        init_monitor, replace_child,
+    },
+    secrets::{SecretClient, SecretQuery},
+};
 use artisan_middleware::{
     aggregator::Status,
     config::AppConfig,
     dusa_collection_utils::{
         self,
-        core::logger::{get_log_level, set_log_level},
+        core::{errors::ErrorArray, logger::{get_log_level, set_log_level}},
     },
     process_manager::SupervisedChild,
-    state_persistence::{AppState, StatePersistence, log_error, update_state, wind_down_state},
+    state_persistence::{log_error, update_state, wind_down_state, AppState, StatePersistence},
 };
 use child::{create_child, run_install_process, run_one_shot_process};
 use config::{generate_application_state, get_config, specific_config};
@@ -38,8 +44,8 @@ use tokio::time::{sleep, timeout};
 mod child;
 mod config;
 mod global_child;
-mod signals;
 mod secrets;
+mod signals;
 
 /// Application entrypoint.
 ///
@@ -48,6 +54,8 @@ mod secrets;
 #[tokio::main]
 async fn main() {
     // Initialization
+
+    // reading config files
     log!(LogLevel::Trace, "Initializing application...");
     let mut config: AppConfig = get_config();
     let state_path: PathType = StatePersistence::get_state_path(&config);
@@ -87,6 +95,53 @@ async fn main() {
         log!(LogLevel::Info, "Log Level: {}", config.log_level);
     }
 
+    // requesting enviornment data
+    let query: SecretQuery = match get_query() {
+        Ok(q) => q,
+        Err(_) => {
+            log!(LogLevel::Error, "Error loading env query");
+            std::process::exit(0)
+        }
+    };
+
+    log!(LogLevel::Debug, "Secret Server Addr: {}", &settings.secret_server_addr);
+    let client = match SecretClient::connect(&settings.secret_server_addr).await {
+        Ok(c) => c,
+        Err(err) => {
+            log!(
+                LogLevel::Error,
+                "Error dialing secret server: {}",
+                err.to_string()
+            );
+            std::process::exit(0)
+        }
+    };
+
+    match query.get_all(client.clone()).await {
+        Ok(results) => {
+            for item in results {
+                println!("key: {}, value: {:?}", item.0, item.1)
+            }
+        },
+        Err(err) => {
+            ErrorArray::from(err).display(true)
+        },
+    }
+
+    match GLOBAL_CLINENT_CONNECTION.try_lock() {
+        Ok(mut store) => {
+            *store = Some(client)
+        },
+        Err(err) => {
+            log!(
+                LogLevel::Error,
+                "Error storing secret server connection: {}",
+                err.to_string()
+            );
+            std::process::exit(0)
+        }
+    }
+    
     log!(LogLevel::Info, "{} Started", config.app_name);
     log!(
         LogLevel::Info,

@@ -1,6 +1,6 @@
 // build.rs
-use std::{env, fs};
 use std::path::Path;
+use std::{env, fs};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let manifest_dir = env::var("CARGO_MANIFEST_DIR")?;
@@ -11,18 +11,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:rerun-if-changed={}", proto_file.display());
     println!("cargo:rerun-if-changed={}", proto_root.display());
 
+    let mut config = prost_build::Config::new();
+    config.type_attribute(".", "#[derive(serde::Serialize, serde::Deserialize)]");
+
     tonic_build::configure()
-        .build_client(true)
-        // write the .rs files into src/proto so you can check them in if you like
+        .build_server(false)
         .out_dir("src/secrets")
-        // descriptor into OUT_DIR (avoids accidental check–in)
         .file_descriptor_set_path(format!("{}/secret_descriptor.bin", proto_root.display()))
-        .compile(
-            // input .proto
-            &[proto_file.to_str().unwrap()],
-            // include root
-            &[proto_root.to_str().unwrap()],
-        )?;
+        .compile_with_config(config, &["proto/secret.proto"], &["proto"])?;
 
     // Copy files to the out dir
     let binding = env::var("OUT_DIR")?;
@@ -30,6 +26,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let generated = Path::new("src/secrets/secret_service.rs");
     let dest = out_dir.join("secret_service.rs");
     fs::copy(generated, dest)?;
-    
+
     Ok(())
 }

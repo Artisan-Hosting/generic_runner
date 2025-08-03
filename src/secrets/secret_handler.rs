@@ -5,6 +5,7 @@ use artisan_middleware::dusa_collection_utils::{
 };
 use tonic::transport::Channel;
 
+#[derive(Debug, Clone)]
 pub struct SecretClient {
     client: SecretServiceClient<Channel>,
     _log: RollingBuffer,
@@ -16,7 +17,7 @@ impl SecretClient {
         self._log.push(msg);
     }
 
-    pub async fn connect(addr: String) -> Result<Self, tonic::transport::Error> {
+    pub async fn connect(addr: &String) -> Result<Self, tonic::transport::Error> {
         let mut buffer = RollingBuffer::new(1024);
         let log_msg = format!("Attempting to connect to secret server @ {}", addr);
         log!(LogLevel::Debug, "{}", log_msg);

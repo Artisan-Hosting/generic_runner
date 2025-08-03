@@ -7,3 +7,4 @@ install_command = "npm --prefix /home/dwhitfield/Developer/GIT/Mitobyte install"
 build_command = "npm --prefix /home/dwhitfield/Developer/GIT/Mitobyte run build"
 run_command = "npm --prefix /home/dwhitfield/Developer/GIT/Mitobyte run start"
 ignored_subdirs = [".git", "build", "next", "node", ".next", ".cache", "package-lock", "node_modules"]
+secret_server_addr = "100.105.82.205:50052"

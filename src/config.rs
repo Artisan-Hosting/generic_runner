@@ -26,6 +26,8 @@ use dusa_collection_utils::{
 use serde::Deserialize;
 use std::fmt;
 
+use crate::{global_child::GLOBAL_SECRET_QUERY, secrets::SecretQuery};
+
 /// Load the base [`AppConfig`] and populate fields derived from Cargo
 /// environment variables.
 pub fn get_config() -> AppConfig {
@@ -60,6 +62,14 @@ pub async fn generate_application_state(state_path: &PathType, config: &AppConfi
             set_log_level(loaded_data.config.log_level);
             loaded_data.error_log.clear();
             update_state(&mut loaded_data, &state_path, None).await;
+
+            {
+                // creating query
+                let query: SecretQuery =
+                    SecretQuery::new(config.app_name.to_string(), config.environment.clone(), None);
+                _ = GLOBAL_SECRET_QUERY.set(query);
+            }
+
             loaded_data
         }
         Err(e) => {
@@ -99,6 +109,13 @@ pub async fn generate_application_state(state_path: &PathType, config: &AppConfi
             state.error_log.clear();
             update_state(&mut state, &state_path, None).await;
 
+            {
+                // creating query
+                let query: SecretQuery =
+                    SecretQuery::new(config.app_name.to_string(), config.environment.clone(), None);
+                _ = GLOBAL_SECRET_QUERY.set(query);
+            }
+
             state
         }
     }
@@ -128,6 +145,7 @@ pub struct AppSpecificConfig {
     #[serde(default)]
     pub build_command: Option<String>,
     pub run_command: String,
+    pub secret_server_addr: String,
 }
 
 #[allow(dead_code)]
