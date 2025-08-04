@@ -103,7 +103,6 @@ async fn main() {
     let env_dummy: PathType = PathType::Content(default_env_location());
     if env_dummy == env_path {
         log!(LogLevel::Warn, "No env file location specified skipping...");
-        return;
     }
     _ = env_path.delete();
 
@@ -117,7 +116,6 @@ async fn main() {
 
     if &settings.secret_server_addr == &default_secret_server() {
         log!(LogLevel::Warn, "No secret server address defined, skipping ...");
-        return
     }
 
     let client = match SecretClient::connect(&settings.secret_server_addr).await {
@@ -141,8 +139,6 @@ async fn main() {
                     query.runner_id,
                     query.enviornment_id
                 );
-
-                return;
             }
 
             // formatting results to write
@@ -216,7 +212,6 @@ async fn main() {
         if let Err(err) = run_one_shot_process(&settings, &mut state, &state_path).await {
             log!(LogLevel::Error, "One-shot process failed: {}", err);
             log_error(&mut state, err, &state_path).await;
-            return;
         }
     }
 
