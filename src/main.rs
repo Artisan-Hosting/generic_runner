@@ -148,7 +148,7 @@ async fn main() {
             // formatting results to write
             let mut lines: Vec<String> = Vec::new();
             results.iter().for_each(|item| {
-                lines.push(format!("{}={}\n", item.0, str::from_utf8(&item.1).unwrap()));
+                lines.push(format!("{}={}\n", item.0, std::str::from_utf8(&item.1).unwrap()));
             });
 
             // Opening file
