@@ -12,7 +12,7 @@ use crate::{
     },
     secrets::{SecretClient, SecretQuery},
 };
-use ais_runner::runner_environment::{
+use crate::runner_environment::{
     get_global_environment, parse_environment_file, set_global_environment,
 };
 use artisan_middleware::{
