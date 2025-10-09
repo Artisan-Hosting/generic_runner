@@ -12,6 +12,9 @@ use crate::{
     },
     secrets::{SecretClient, SecretQuery},
 };
+use ais_runner::runner_environment::{
+    get_global_environment, parse_environment_file, set_global_environment,
+};
 use artisan_middleware::{
     aggregator::Status,
     config::AppConfig,
@@ -22,6 +25,7 @@ use artisan_middleware::{
             logger::{get_log_level, set_log_level},
         },
     },
+    enviornment::definitions::Enviornment,
     process_manager::SupervisedChild,
     state_persistence::{AppState, StatePersistence, log_error, update_state, wind_down_state},
 };
@@ -50,6 +54,7 @@ use tokio::time::{sleep, timeout};
 mod child;
 mod config;
 mod global_child;
+mod runner_environment;
 mod secrets;
 mod signals;
 
@@ -104,10 +109,10 @@ async fn main() {
     // requesting enviornment data
     'client_secrets: {
         // establishing defaults
-        let env_dummy: PathType = PathType::Content(default_env_location());
         let sec_dummy: &String = &default_secret_server();
 
         // getting correct values
+        let env_dummy: PathType = PathType::Content(default_env_location());
         let env_path: PathType = PathType::Content(settings.env_file_location.clone());
         let secret_uri: &String = &settings.secret_server_addr;
 
@@ -133,9 +138,39 @@ async fn main() {
         }
 
         // this implication checks if the file exists
-        if let Err(err) = env_path.delete() {
-            log!(LogLevel::Warn, "Failed to delete: {}", err.err_mesg);
+        if !env_path.exists() {
+            log!(LogLevel::Warn, "Env file doesn't exist");
             break 'client_secrets;
+        }
+
+        log!(
+            LogLevel::Info,
+            "Parsing environment configuration from {}",
+            env_path
+        );
+
+        match parse_environment_file(&env_path).await {
+            Ok(environment_data) => {
+                log!(
+                    LogLevel::Trace,
+                    "Caching parsed environment configuration globally"
+                );
+                set_global_environment(environment_data).await;
+                if let Some(Enviornment::V1(data)) = get_global_environment().await {
+                    log!(LogLevel::Trace, "Environment cache ready: {:?}", data);
+                }
+                log!(
+                    LogLevel::Info,
+                    "Environment configuration cached successfully"
+                );
+            }
+            Err(err) => {
+                log!(
+                    LogLevel::Error,
+                    "Failed to parse environment configuration: {}",
+                    err
+                );
+            }
         }
 
         let client: SecretClient = match SecretClient::connect(&settings.secret_server_addr).await {
@@ -238,7 +273,6 @@ async fn main() {
 
         log!(LogLevel::Debug, "Copied secret data from the server");
     }
-
 
     log!(LogLevel::Info, "{} Started", config.app_name);
 

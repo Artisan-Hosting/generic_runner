@@ -6,9 +6,9 @@ use artisan_middleware::dusa_collection_utils::core::errors::{ErrorArrayItem, Er
 
 #[derive(Clone, Debug)]
 pub struct SecretQuery {
-    pub (crate) runner_id: String,
-    pub (crate) enviornment_id: String,
-    pub (crate) version: i64,
+    pub(crate) runner_id: String,
+    pub(crate) enviornment_id: String,
+    pub(crate) version: i64,
 }
 
 pub type AllSecrets = Vec<(String, Vec<u8>)>;

@@ -257,5 +257,9 @@ impl fmt::Display for AppSpecificConfig {
     }
 }
 
-pub fn default_secret_server() -> String { String::from("localhost:50051") }
-pub fn default_env_location() -> String { String::from("/tmp/.trash") }
+pub fn default_secret_server() -> String {
+    String::from("localhost:50051")
+}
+pub fn default_env_location() -> String {
+    String::from("/tmp/.trash")
+}

@@ -19,6 +19,7 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 
 use crate::config::AppSpecificConfig;
+use crate::runner_environment::apply_environment_to_command;
 
 /// Spawn the main child process defined in [`AppSpecificConfig`].
 ///
@@ -41,9 +42,13 @@ pub async fn create_child(
     let mut iter = parts.into_iter();
     let program = iter.next().unwrap();
     let mut command: Command = Command::new(program);
+
     for arg in iter {
         command.arg(arg);
     }
+
+    // Setting values defined in env files
+    apply_environment_to_command(&mut command).await;
 
     match spawn_complex_process(&mut command, Some(settings.project_path()), false, true).await {
         Ok(mut spawned_child) => {
