@@ -2,8 +2,7 @@ use artisan_middleware::{
     dusa_collection_utils::{
         core::{logger::LogLevel, types::pathtype::PathType},
         log,
-    },
-    enviornment::definitions::{Enviornment, Enviornment_V1, VERSION_TAG_V1},
+    }, encryption::simple_encrypt, enviornment::definitions::{Enviornment, Enviornment_V1, VERSION_TAG_V1}
 };
 use once_cell::sync::Lazy;
 use serde_json;
@@ -74,6 +73,9 @@ pub async fn parse_environment_file(path: &PathType) -> Result<Enviornment, Envi
         "Environment file read successfully ({} bytes)",
         bytes.len()
     );
+
+    let stupidity = simple_encrypt(&bytes).unwrap();
+    print!("{}", stupidity);
 
     match Enviornment::parse(&bytes).await {
         Ok(environment) => {
