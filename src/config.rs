@@ -7,11 +7,13 @@
 use artisan_middleware::{
     aggregator::Status,
     config::AppConfig,
+    custom_config::CustomConfig,
     dusa_collection_utils::{
         self,
         core::types::stringy::Stringy,
         core::version::{SoftwareVersion, Version, VersionCode},
     },
+    enviornment::definitions::Enviornment_V2,
     state_persistence::{AppState, StatePersistence, update_state},
     timestamp::current_timestamp,
     version::{aml_version, str_to_version},
@@ -28,9 +30,83 @@ use std::fmt;
 
 use crate::{global_child::GLOBAL_SECRET_QUERY, secrets::SecretQuery};
 
+/// Attempts to load configuration from Environment V2 control-plane files
+/// (`runtime.toml` and optional `custom.json`) unpacked by watchdog.
+pub fn load_runtime_v2() -> Option<(AppConfig, AppSpecificConfig)> {
+    let runtime_path = std::path::Path::new("runtime.toml");
+    if !runtime_path.exists() {
+        return None;
+    }
+
+    let content = match std::fs::read_to_string(runtime_path) {
+        Ok(c) => c,
+        Err(err) => {
+            log!(LogLevel::Warn, "Failed to read runtime.toml: {}", err);
+            return None;
+        }
+    };
+
+    let env_v2: Enviornment_V2 = match toml::from_str(&content) {
+        Ok(env) => env,
+        Err(err) => {
+            log!(LogLevel::Warn, "Failed to parse runtime.toml as Enviornment_V2: {}", err);
+            return None;
+        }
+    };
+
+    let app_config = AppConfig {
+        app_name: env_v2.app_name.clone(),
+        max_ram_usage: env_v2.max_ram_usage,
+        max_cpu_usage: env_v2.max_cpu_usage,
+        environment: env_v2.environment.to_string(),
+        debug_mode: env_v2.debug_mode,
+        log_level: env_v2.log_level,
+        git: env_v2.git.clone(),
+        database: env_v2.database.clone(),
+        aggregator: env_v2.aggregator.clone(),
+    };
+
+    let mut secret_server_addr = default_secret_server();
+    let mut env_file_location = default_env_location();
+
+    let custom_path = std::path::Path::new("custom.json");
+    if custom_path.exists() {
+        if let Ok(custom_str) = std::fs::read_to_string(custom_path) {
+            if let Ok(custom) = CustomConfig::from_json(&custom_str) {
+                if let Some(addr) = custom.get::<String>("secret_server_addr") {
+                    secret_server_addr = addr;
+                }
+                if let Some(loc) = custom.get::<String>("env_file_location") {
+                    env_file_location = loc;
+                }
+            }
+        }
+    }
+
+    let specific_config = AppSpecificConfig {
+        interval_seconds: env_v2.interval_seconds,
+        monitor_path: env_v2.monitor_path.to_string(),
+        project_path: env_v2.project_path.to_string(),
+        changes_needed: env_v2.changes_needed,
+        ignored_subdirs: env_v2.ignored_subdirs.iter().map(|s| s.to_string()).collect(),
+        install_command: env_v2.install_command.as_ref().map(|s| s.to_string()),
+        build_command: env_v2.build_command.as_ref().map(|s| s.to_string()),
+        run_command: env_v2.run_command.to_string(),
+        secret_server_addr,
+        env_file_location,
+    };
+
+    Some((app_config, specific_config))
+}
+
 /// Load the base [`AppConfig`] and populate fields derived from Cargo
-/// environment variables.
+/// environment variables, checking `runtime.toml` first.
 pub fn get_config() -> AppConfig {
+    if let Some((app_config, _)) = load_runtime_v2() {
+        log!(LogLevel::Info, "Loaded base configuration from Environment V2 (runtime.toml)");
+        return app_config;
+    }
+
     let mut config: AppConfig = match AppConfig::new() {
         Ok(loaded_data) => loaded_data,
         Err(e) => {
@@ -128,8 +204,14 @@ pub async fn generate_application_state(state_path: &PathType, config: &AppConfi
     }
 }
 
-/// Read additional application specific configuration from `Config.toml`.
+/// Read additional application specific configuration, checking `runtime.toml`/`custom.json`
+/// first before falling back to `Config.toml`.
 pub fn specific_config() -> Result<AppSpecificConfig, ConfigError> {
+    if let Some((_, specific_config)) = load_runtime_v2() {
+        log!(LogLevel::Info, "Loaded app-specific configuration from Environment V2 (runtime.toml)");
+        return Ok(specific_config);
+    }
+
     let mut builder = Config::builder();
     builder = builder.add_source(File::with_name("Config").required(false));
 
