@@ -47,8 +47,9 @@ pub async fn create_child(
         command.arg(arg);
     }
 
-    // Setting values defined in env files
-    apply_environment_to_command(&mut command).await;
+    // Applies execution uid/gid/PATH modifier; the child inherits our own
+    // process environment for everything else (see runner_environment.rs).
+    apply_environment_to_command(&mut command, settings);
 
     match spawn_complex_process(&mut command, Some(settings.project_path()), false, true).await {
         Ok(mut spawned_child) => {

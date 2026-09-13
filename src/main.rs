@@ -4,34 +4,19 @@
 //! changes and restarts the child when necessary.  High level state is
 //! persisted across restarts using [`AppState`].
 
-use crate::{
-    config::{default_env_location, default_secret_server},
-    global_child::{
-        GLOBAL_CHILD, GLOBAL_CLINENT_CONNECTION, GLOBAL_MONITOR, get_query, init_child,
-        init_monitor, replace_child,
-    },
-    secrets::{SecretClient, SecretQuery},
-};
-use crate::runner_environment::{
-    get_global_environment, parse_environment_file, set_global_environment,
-};
+use crate::global_child::{GLOBAL_CHILD, GLOBAL_MONITOR, init_child, init_monitor, replace_child};
 use artisan_middleware::{
     aggregator::Status,
     config::AppConfig,
     dusa_collection_utils::{
         self,
-        core::{
-            errors::ErrorArray,
-            logger::{get_log_level, set_log_level},
-        },
+        core::logger::{get_log_level, set_log_level},
     },
-    enviornment::definitions::Enviornment,
     process_manager::SupervisedChild,
     state_persistence::{AppState, StatePersistence, log_error, update_state, wind_down_state},
 };
 use child::{create_child, run_install_process, run_one_shot_process};
 use config::{generate_application_state, get_config, specific_config};
-use std::io::Write;
 
 use dir_watcher::{MonitorMode, Options, RawFileMonitor, RecursiveMode};
 use dusa_collection_utils::{
@@ -42,7 +27,6 @@ use dusa_collection_utils::{
 };
 use signals::{sighup_watch, sigusr_watch};
 use std::{
-    fs::OpenOptions,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -55,7 +39,6 @@ mod child;
 mod config;
 mod global_child;
 mod runner_environment;
-mod secrets;
 mod signals;
 
 /// Application entrypoint.
@@ -104,174 +87,6 @@ async fn main() {
         log!(LogLevel::Info, "Application State: {}", state);
         log!(LogLevel::Info, "Application State: {}", settings);
         log!(LogLevel::Info, "Log Level: {}", config.log_level);
-    }
-
-    // requesting enviornment data
-    'client_secrets: {
-        // establishing defaults
-        let sec_dummy: &String = &default_secret_server();
-
-        // getting correct values
-        let env_dummy: PathType = PathType::Content(default_env_location());
-        let env_path: PathType = PathType::Content(settings.env_file_location.clone());
-        let secret_uri: &String = &settings.secret_server_addr;
-
-        if env_dummy == env_path {
-            log!(LogLevel::Warn, "No env file location specified skipping...");
-            break 'client_secrets;
-        }
-
-        let query: SecretQuery = match get_query() {
-            Ok(q) => q,
-            Err(_) => {
-                log!(LogLevel::Error, "Error loading env query");
-                break 'client_secrets;
-            }
-        };
-
-        if sec_dummy == secret_uri {
-            log!(
-                LogLevel::Warn,
-                "No secret server address defined, skipping ..."
-            );
-            break 'client_secrets;
-        }
-
-        // this implication checks if the file exists
-        if !env_path.exists() {
-            log!(LogLevel::Warn, "Env file doesn't exist");
-            break 'client_secrets;
-        }
-
-        log!(
-            LogLevel::Info,
-            "Parsing environment configuration from {}",
-            env_path
-        );
-
-        match parse_environment_file(&env_path).await {
-            Ok(environment_data) => {
-                log!(
-                    LogLevel::Trace,
-                    "Caching parsed environment configuration globally"
-                );
-                set_global_environment(environment_data).await;
-                if let Some(Enviornment::V1(data)) = get_global_environment().await {
-                    log!(LogLevel::Trace, "Environment cache ready: {:?}", data);
-                }
-                log!(
-                    LogLevel::Info,
-                    "Environment configuration cached successfully"
-                );
-            }
-            Err(err) => {
-                log!(
-                    LogLevel::Error,
-                    "Failed to parse environment configuration: {}",
-                    err
-                );
-            }
-        }
-
-        let client: SecretClient = match SecretClient::connect(&settings.secret_server_addr).await {
-            Ok(c) => c,
-            Err(err) => {
-                log!(
-                    LogLevel::Error,
-                    "Error dialing secret server: {}",
-                    err.to_string()
-                );
-                break 'client_secrets;
-            }
-        };
-
-        match query.get_all(client.clone()).await {
-            Ok(results) => {
-                if results.is_empty() {
-                    log!(
-                        LogLevel::Debug,
-                        "No env data for current runtime: id: {} env: {}",
-                        query.runner_id,
-                        query.enviornment_id
-                    );
-
-                    break 'client_secrets;
-                }
-
-                // formatting results to write
-                let mut lines: Vec<String> = Vec::new();
-                let raw_lines: Vec<&(std::string::String, Vec<u8>)> = results.iter().collect();
-
-                for data in raw_lines {
-                    match std::str::from_utf8(&data.1) {
-                        Ok(ln) => {
-                            let line: String = format!("{}={}\n", data.0, ln);
-                            lines.push(line);
-                        }
-                        Err(err) => {
-                            log!(
-                                LogLevel::Warn,
-                                "Failed to decode a value: {}, skipping....",
-                                err.to_string()
-                            );
-                            continue;
-                        }
-                    }
-                }
-
-                if lines.is_empty() {
-                    log!(
-                        LogLevel::Warn,
-                        "lines array empty skipping creating blank file..."
-                    );
-                    break 'client_secrets;
-                }
-
-                // Opening file
-                let mut options: OpenOptions = OpenOptions::new();
-                options.create_new(true);
-                let mut file: std::fs::File = match options.open(env_path) {
-                    Ok(file) => file,
-                    Err(err) => {
-                        log!(
-                            LogLevel::Error,
-                            "Failed to open env file: {}",
-                            err.to_string()
-                        );
-                        break 'client_secrets;
-                    }
-                };
-
-                // Writing
-                lines.iter().for_each(|line| {
-                    if let Err(err) = write!(file, "{}", line) {
-                        log!(
-                            LogLevel::Warn,
-                            "Lines maybe missing from the env file: {}",
-                            err.to_string()
-                        )
-                    }
-                });
-
-                // Closing file
-                _ = file.flush();
-            }
-            Err(err) => ErrorArray::from(err).display(true),
-        }
-
-        match GLOBAL_CLINENT_CONNECTION.try_lock() {
-            Ok(mut store) => *store = Some(client),
-            Err(err) => {
-                log!(
-                    LogLevel::Error,
-                    "Error storing secret server connection: {}",
-                    err.to_string()
-                );
-                std::process::exit(0)
-            }
-        }
-
-        log!(LogLevel::Debug, "Copied secret data from the server");
     }
 
     log!(LogLevel::Info, "{} Started", config.app_name);
