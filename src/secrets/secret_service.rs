@@ -13,6 +13,13 @@ pub struct CreateSecretRequest {
     pub value: ::prost::alloc::string::String,
     #[prost(string, tag = "5")]
     pub actor: ::prost::alloc::string::String,
+    /// RBAC Phase 3 -- exactly one of these two is required; a request with
+    /// neither is rejected. `actor` is informational only: the server records
+    /// the authenticated identity instead of trusting it.
+    #[prost(string, tag = "6")]
+    pub access_token: ::prost::alloc::string::String,
+    #[prost(string, tag = "7")]
+    pub service_credential: ::prost::alloc::string::String,
 }
 #[derive(serde::Serialize, serde::Deserialize)]
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -28,6 +35,13 @@ pub struct GetSecretRequest {
     pub version: i64,
     #[prost(string, tag = "5")]
     pub actor: ::prost::alloc::string::String,
+    /// RBAC Phase 3 -- exactly one of these two is required; a request with
+    /// neither is rejected. `actor` is informational only: the server records
+    /// the authenticated identity instead of trusting it.
+    #[prost(string, tag = "6")]
+    pub access_token: ::prost::alloc::string::String,
+    #[prost(string, tag = "7")]
+    pub service_credential: ::prost::alloc::string::String,
 }
 #[derive(serde::Serialize, serde::Deserialize)]
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -43,6 +57,13 @@ pub struct UpdateSecretRequest {
     pub new_value: ::prost::alloc::string::String,
     #[prost(string, tag = "5")]
     pub actor: ::prost::alloc::string::String,
+    /// RBAC Phase 3 -- exactly one of these two is required; a request with
+    /// neither is rejected. `actor` is informational only: the server records
+    /// the authenticated identity instead of trusting it.
+    #[prost(string, tag = "6")]
+    pub access_token: ::prost::alloc::string::String,
+    #[prost(string, tag = "7")]
+    pub service_credential: ::prost::alloc::string::String,
 }
 #[derive(serde::Serialize, serde::Deserialize)]
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -54,6 +75,13 @@ pub struct DeleteSecretRequest {
     pub environment_id: ::prost::alloc::string::String,
     #[prost(string, tag = "3")]
     pub secret_key: ::prost::alloc::string::String,
+    /// RBAC Phase 3 -- exactly one of these two is required; a request with
+    /// neither is rejected. `actor` is informational only: the server records
+    /// the authenticated identity instead of trusting it.
+    #[prost(string, tag = "4")]
+    pub access_token: ::prost::alloc::string::String,
+    #[prost(string, tag = "5")]
+    pub service_credential: ::prost::alloc::string::String,
 }
 #[derive(serde::Serialize, serde::Deserialize)]
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -81,6 +109,13 @@ pub struct GetAllSecretsRequest {
     pub environment_id: ::prost::alloc::string::String,
     #[prost(int64, tag = "3")]
     pub version: i64,
+    /// RBAC Phase 3 -- exactly one of these two is required; a request with
+    /// neither is rejected. `actor` is informational only: the server records
+    /// the authenticated identity instead of trusting it.
+    #[prost(string, tag = "4")]
+    pub access_token: ::prost::alloc::string::String,
+    #[prost(string, tag = "5")]
+    pub service_credential: ::prost::alloc::string::String,
 }
 #[derive(serde::Serialize, serde::Deserialize)]
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -208,6 +243,12 @@ pub mod secret_service_client {
                 .insert(GrpcMethod::new("secret_service.SecretService", "CreateSecret"));
             self.inner.unary(req, path, codec).await
         }
+        /// Status code contract: NOT_FOUND means no secret exists for this key
+        /// (confirmed absent -- safe for a caller to provision a new value in its
+        /// place). Any other non-OK status (typically INTERNAL) means the lookup
+        /// itself failed and must never be treated as "doesn't exist" -- clients
+        /// should branch on status.code(), not on the message text, which may
+        /// change.
         pub async fn get_secret(
             &mut self,
             request: impl tonic::IntoRequest<super::GetSecretRequest>,

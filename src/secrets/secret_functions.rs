@@ -27,6 +27,8 @@ impl SecretQuery {
 
     pub async fn get_all(&self, mut client: SecretClient) -> Result<AllSecrets, ErrorArrayItem> {
         let request: GetAllSecretsRequest = GetAllSecretsRequest {
+            access_token: String::new(),
+            service_credential: client.service_credential().to_owned(),
             runner_id: self.runner_id.clone(),
             environment_id: self.enviornment_id.clone(),
             version: self.version,

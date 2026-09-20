@@ -4,6 +4,7 @@ pub(self) mod secret_service {
 }
 
 // Exporting stuff
+mod mtls_client;
 mod secret_handler;
 mod secret_functions;
 pub use secret_functions::SecretQuery;

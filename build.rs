@@ -18,7 +18,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build_server(false)
         .out_dir("src/secrets")
         .file_descriptor_set_path(format!("{}/secret_descriptor.bin", proto_root.display()))
-        .compile_with_config(config, &["proto/secret.proto"], &["proto"])?;
+        .compile_with_config(config, &["../../ais_proto/secret.proto"], &["../../ais_proto"])?;
 
     // Copy files to the out dir
     let binding = env::var("OUT_DIR")?;
