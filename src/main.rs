@@ -6,7 +6,7 @@
 
 use crate::{
     config::{default_env_location, default_secret_server}, global_child::{
-        get_query, init_child, init_monitor, replace_child, GLOBAL_CHILD, GLOBAL_CLINENT_CONNECTION, GLOBAL_MONITOR
+        get_query, init_child, init_monitor, replace_child, CHILD_ENV, GLOBAL_CHILD, GLOBAL_CLINENT_CONNECTION, GLOBAL_MONITOR
     }, secrets::{SecretClient, SecretQuery}
 };
 use artisan_middleware::{
@@ -22,7 +22,7 @@ use artisan_middleware::{
     process_manager::SupervisedChild,
     state_persistence::{AppState, StatePersistence, log_error, update_state, wind_down_state},
 };
-use child::{create_child, run_install_process, run_one_shot_process};
+use child::{create_child, run_install_process, run_one_shot_process, secrets_to_env};
 use config::{generate_application_state, get_config, specific_config};
 use std::io::Write;
 
@@ -74,7 +74,7 @@ async fn main() {
         }
         Err(e) => {
             log!(LogLevel::Error, "Error loading settings: {}", e);
-            std::process::exit(0)
+            std::process::exit(100)
         }
     };
 
@@ -98,100 +98,97 @@ async fn main() {
         log!(LogLevel::Info, "Log Level: {}", config.log_level);
     }
 
-    // requesting enviornment data
+    // Secrets are optional. An app with no secret server configured, or with no
+    // secrets stored, must still run: this used to `return` here, which made the
+    // runner exit without ever starting the app (the common case for a customer
+    // who deploys without adding any secrets).
     let env_path: PathType = PathType::Content(settings.env_file_location.clone());
     let env_dummy: PathType = PathType::Content(default_env_location());
-    if env_dummy == env_path {
-        log!(LogLevel::Warn, "No env file location specified skipping...");
-        return;
-    }
-    _ = env_path.delete();
+    let secrets_configured = env_dummy != env_path && settings.secret_server_addr != default_secret_server();
 
-    let query: SecretQuery = match get_query() {
-        Ok(q) => q,
-        Err(_) => {
-            log!(LogLevel::Error, "Error loading env query");
-            std::process::exit(0)
-        }
-    };
+    if !secrets_configured {
+        log!(
+            LogLevel::Info,
+            "No secret server / env file configured; starting {} without secrets",
+            config.app_name
+        );
+    } else {
+        _ = env_path.delete();
 
-    if &settings.secret_server_addr == &default_secret_server() {
-        log!(LogLevel::Warn, "No secret server address defined, skipping ...");
-        return
-    }
-
-    let client = match SecretClient::connect(&settings.secret_server_addr).await {
-        Ok(c) => c,
-        Err(err) => {
-            log!(
-                LogLevel::Error,
-                "Error dialing secret server: {}",
-                err.to_string()
-            );
-            std::process::exit(0)
-        }
-    };
-
-    match query.get_all(client.clone()).await {
-        Ok(results) => {
-            if results.is_empty() {
-                log!(
-                    LogLevel::Debug,
-                    "No env data for current runtime: id: {} env: {}",
-                    query.runner_id,
-                    query.enviornment_id
-                );
-
-                return;
+        let query: SecretQuery = match get_query() {
+            Ok(q) => q,
+            Err(_) => {
+                let err = ErrorArrayItem::new(Errors::GeneralError, "Error loading the secret query".to_owned());
+                log_error(&mut state, err, &state_path).await;
+                wind_down_state(&mut state, &state_path).await;
+                std::process::exit(100)
             }
+        };
 
-            // formatting results to write
-            let mut lines: Vec<String> = Vec::new();
-            results.iter().for_each(|item| {
-                lines.push(format!("{}={}\n", item.0, str::from_utf8(&item.1).unwrap()));
-            });
+        let client = match SecretClient::connect(&settings.secret_server_addr).await {
+            Ok(c) => c,
+            Err(err) => {
+                // Secrets were asked for and cannot be had: that is a failed
+                // start, recorded in the state so it can be seen, not a quiet exit(0).
+                log!(LogLevel::Error, "Error dialing secret server: {}", err.to_string());
+                let item = ErrorArrayItem::new(
+                    Errors::ConnectionError,
+                    format!("Error dialing secret server: {}", err),
+                );
+                log_error(&mut state, item, &state_path).await;
+                wind_down_state(&mut state, &state_path).await;
+                std::process::exit(100)
+            }
+        };
 
-            // Opening file
-            let mut options = OpenOptions::new();
-            options.create_new(true);
-            let mut file = match options.open(env_path) {
-                Ok(file) => file,
-                Err(err) => {
+        match query.get_all(client.clone()).await {
+            Ok(results) => {
+                if results.is_empty() {
                     log!(
-                        LogLevel::Error,
-                        "Failed to open env file: {}",
-                        err.to_string()
+                        LogLevel::Debug,
+                        "No env data for current runtime: id: {} env: {}",
+                        query.runner_id,
+                        query.enviornment_id
                     );
-                    std::process::exit(100);
-                }
-            };
+                } else {
+                    // The app's own environment (this is what actually reaches
+                    // its commands), and the env file for anything that reads one.
+                    let env = secrets_to_env(&results);
+                    let lines: Vec<String> = env.iter().map(|(k, v)| format!("{}={}\n", k, v)).collect();
+                    _ = CHILD_ENV.set(env);
 
-            // Writing
-            lines.iter().for_each(|line| {
-                if let Err(err) = write!(file, "{}", line) {
-                    log!(
-                        LogLevel::Warn,
-                        "Lines maybe missing from the env file: {}",
-                        err.to_string()
-                    )
-                }
-            });
+                    let mut options = OpenOptions::new();
+                    options.create_new(true);
+                    let mut file = match options.open(env_path) {
+                        Ok(file) => file,
+                        Err(err) => {
+                            log!(LogLevel::Error, "Failed to open env file: {}", err.to_string());
+                            std::process::exit(100);
+                        }
+                    };
 
-            // Closing file
-            _ = file.flush();
+                    lines.iter().for_each(|line| {
+                        if let Err(err) = write!(file, "{}", line) {
+                            log!(
+                                LogLevel::Warn,
+                                "Lines maybe missing from the env file: {}",
+                                err.to_string()
+                            )
+                        }
+                    });
+
+                    _ = file.flush();
+                }
+            }
+            Err(err) => ErrorArray::from(err).display(true),
         }
-        Err(err) => ErrorArray::from(err).display(true),
-    }
 
-    match GLOBAL_CLINENT_CONNECTION.try_lock() {
-        Ok(mut store) => *store = Some(client),
-        Err(err) => {
-            log!(
-                LogLevel::Error,
-                "Error storing secret server connection: {}",
-                err.to_string()
-            );
-            std::process::exit(0)
+        match GLOBAL_CLINENT_CONNECTION.try_lock() {
+            Ok(mut store) => *store = Some(client),
+            Err(err) => {
+                log!(LogLevel::Error, "Error storing secret server connection: {}", err.to_string());
+                std::process::exit(100)
+            }
         }
     }
 

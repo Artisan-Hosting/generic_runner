@@ -26,6 +26,12 @@ pub static GLOBAL_MONITOR: Lazy<Arc<Mutex<Option<RawFileMonitor>>>> =
 /// Globally available refrence to the current [`SecretQuery`].
 pub static GLOBAL_SECRET_QUERY: OnceCell<SecretQuery> = OnceCell::new();
 
+/// The secrets fetched from the secret server at start-up, as environment
+/// variables for the app's install, build and run commands. Set once, before the
+/// first command runs. Until this existed the secrets were only written to the
+/// env file and never reached the app's own environment.
+pub static CHILD_ENV: OnceCell<Vec<(String, String)>> = OnceCell::new();
+
 /// Globally available persistente connection to the secrets server
 pub static GLOBAL_CLINENT_CONNECTION: Lazy<Arc<Mutex<Option<SecretClient>>>> =
     Lazy::new(|| Arc::new(Mutex::const_new(None)));

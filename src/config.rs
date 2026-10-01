@@ -246,8 +246,9 @@ impl AppSpecificConfig {
         let self_cloned = self.clone();
         let path = PathType::Content(self_cloned.monitor_path);
         if !path.exists() {
+            // A missing project/monitor directory is a failed start, not a clean exit.
             log!(LogLevel::Error, "The path {} doesn't exist", path);
-            std::process::exit(0)
+            std::process::exit(100)
         } else {
             match path.canonicalize() {
                 Ok(canon_path) => PathType::PathBuf(canon_path),
@@ -268,8 +269,9 @@ impl AppSpecificConfig {
         let self_cloned = self.clone();
         let path = PathType::Content(self_cloned.project_path);
         if !path.exists() {
+            // A missing project/monitor directory is a failed start, not a clean exit.
             log!(LogLevel::Error, "The path {} doesn't exist", path);
-            std::process::exit(0)
+            std::process::exit(100)
         } else {
             match path.canonicalize() {
                 Ok(canon_path) => PathType::PathBuf(canon_path),
