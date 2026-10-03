@@ -7,6 +7,7 @@
 use artisan_middleware::{
     aggregator::Status,
     config::AppConfig,
+    custom_config::CustomConfig,
     dusa_collection_utils::{
         self,
         core::types::stringy::Stringy,
