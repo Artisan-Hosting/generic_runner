@@ -4,27 +4,19 @@
 //! changes and restarts the child when necessary.  High level state is
 //! persisted across restarts using [`AppState`].
 
-use crate::{
-    config::{default_env_location, default_secret_server}, global_child::{
-        get_query, init_child, init_monitor, replace_child, GLOBAL_CHILD, GLOBAL_CLINENT_CONNECTION, GLOBAL_MONITOR
-    }, secrets::{SecretClient, SecretQuery}
-};
+use crate::global_child::{GLOBAL_CHILD, GLOBAL_MONITOR, init_child, init_monitor, replace_child};
 use artisan_middleware::{
     aggregator::Status,
     config::AppConfig,
     dusa_collection_utils::{
         self,
-        core::{
-            errors::ErrorArray,
-            logger::{get_log_level, set_log_level},
-        },
+        core::logger::{get_log_level, set_log_level},
     },
     process_manager::SupervisedChild,
     state_persistence::{AppState, StatePersistence, log_error, update_state, wind_down_state},
 };
 use child::{create_child, run_install_process, run_one_shot_process};
 use config::{generate_application_state, get_config, specific_config};
-use std::io::Write;
 
 use dir_watcher::{MonitorMode, Options, RawFileMonitor, RecursiveMode};
 use dusa_collection_utils::{
@@ -35,7 +27,6 @@ use dusa_collection_utils::{
 };
 use signals::{sighup_watch, sigusr_watch};
 use std::{
-    fs::OpenOptions,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -47,7 +38,7 @@ use tokio::time::{sleep, timeout};
 mod child;
 mod config;
 mod global_child;
-mod secrets;
+mod runner_environment;
 mod signals;
 
 /// Application entrypoint.
@@ -98,105 +89,6 @@ async fn main() {
         log!(LogLevel::Info, "Log Level: {}", config.log_level);
     }
 
-    // requesting enviornment data
-    let env_path: PathType = PathType::Content(settings.env_file_location.clone());
-    let env_dummy: PathType = PathType::Content(default_env_location());
-    if env_dummy == env_path {
-        log!(LogLevel::Warn, "No env file location specified skipping...");
-        return;
-    }
-    _ = env_path.delete();
-
-    let query: SecretQuery = match get_query() {
-        Ok(q) => q,
-        Err(_) => {
-            log!(LogLevel::Error, "Error loading env query");
-            std::process::exit(0)
-        }
-    };
-
-    if &settings.secret_server_addr == &default_secret_server() {
-        log!(LogLevel::Warn, "No secret server address defined, skipping ...");
-        return
-    }
-
-    let client = match SecretClient::connect(&settings.secret_server_addr).await {
-        Ok(c) => c,
-        Err(err) => {
-            log!(
-                LogLevel::Error,
-                "Error dialing secret server: {}",
-                err.to_string()
-            );
-            std::process::exit(0)
-        }
-    };
-
-    match query.get_all(client.clone()).await {
-        Ok(results) => {
-            if results.is_empty() {
-                log!(
-                    LogLevel::Debug,
-                    "No env data for current runtime: id: {} env: {}",
-                    query.runner_id,
-                    query.enviornment_id
-                );
-
-                return;
-            }
-
-            // formatting results to write
-            let mut lines: Vec<String> = Vec::new();
-            results.iter().for_each(|item| {
-                lines.push(format!("{}={}\n", item.0, str::from_utf8(&item.1).unwrap()));
-            });
-
-            // Opening file
-            let mut options = OpenOptions::new();
-            options.create_new(true);
-            let mut file = match options.open(env_path) {
-                Ok(file) => file,
-                Err(err) => {
-                    log!(
-                        LogLevel::Error,
-                        "Failed to open env file: {}",
-                        err.to_string()
-                    );
-                    std::process::exit(100);
-                }
-            };
-
-            // Writing
-            lines.iter().for_each(|line| {
-                if let Err(err) = write!(file, "{}", line) {
-                    log!(
-                        LogLevel::Warn,
-                        "Lines maybe missing from the env file: {}",
-                        err.to_string()
-                    )
-                }
-            });
-
-            // Closing file
-            _ = file.flush();
-        }
-        Err(err) => ErrorArray::from(err).display(true),
-    }
-
-    match GLOBAL_CLINENT_CONNECTION.try_lock() {
-        Ok(mut store) => *store = Some(client),
-        Err(err) => {
-            log!(
-                LogLevel::Error,
-                "Error storing secret server connection: {}",
-                err.to_string()
-            );
-            std::process::exit(0)
-        }
-    }
-
-    log!(LogLevel::Debug, "Copied secret data from the server");
-
     log!(LogLevel::Info, "{} Started", config.app_name);
 
     state.status = Status::Building;
@@ -216,7 +108,6 @@ async fn main() {
         if let Err(err) = run_one_shot_process(&settings, &mut state, &state_path).await {
             log!(LogLevel::Error, "One-shot process failed: {}", err);
             log_error(&mut state, err, &state_path).await;
-            return;
         }
     }
 

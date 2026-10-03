@@ -19,7 +19,6 @@ use artisan_middleware::{
     version::{aml_version, str_to_version},
 };
 use colored::Colorize;
-use config::{Config, ConfigError, File};
 use dusa_collection_utils::{
     core::logger::{LogLevel, set_log_level},
     core::types::pathtype::PathType,
@@ -28,95 +27,51 @@ use dusa_collection_utils::{
 use serde::Deserialize;
 use std::fmt;
 
-use crate::{global_child::GLOBAL_SECRET_QUERY, secrets::SecretQuery};
-
-/// Attempts to load configuration from Environment V2 control-plane files
-/// (`runtime.toml` and optional `custom.json`) unpacked by watchdog.
-pub fn load_runtime_v2() -> Option<(AppConfig, AppSpecificConfig)> {
-    let runtime_path = std::path::Path::new("runtime.toml");
-    if !runtime_path.exists() {
-        return None;
-    }
-
-    let content = match std::fs::read_to_string(runtime_path) {
-        Ok(c) => c,
-        Err(err) => {
-            log!(LogLevel::Warn, "Failed to read runtime.toml: {}", err);
-            return None;
-        }
-    };
-
-    let env_v2: Enviornment_V2 = match toml::from_str(&content) {
-        Ok(env) => env,
-        Err(err) => {
-            log!(LogLevel::Warn, "Failed to parse runtime.toml as Enviornment_V2: {}", err);
-            return None;
-        }
-    };
-
-    let app_config = AppConfig {
-        app_name: env_v2.app_name.clone(),
-        max_ram_usage: env_v2.max_ram_usage,
-        max_cpu_usage: env_v2.max_cpu_usage,
-        environment: env_v2.environment.to_string(),
-        debug_mode: env_v2.debug_mode,
-        log_level: env_v2.log_level,
-        git: env_v2.git.clone(),
-        database: env_v2.database.clone(),
-        aggregator: env_v2.aggregator.clone(),
-    };
-
-    let mut secret_server_addr = default_secret_server();
-    let mut env_file_location = default_env_location();
-
-    let custom_path = std::path::Path::new("custom.json");
-    if custom_path.exists() {
-        if let Ok(custom_str) = std::fs::read_to_string(custom_path) {
-            if let Ok(custom) = CustomConfig::from_json(&custom_str) {
-                if let Some(addr) = custom.get::<String>("secret_server_addr") {
-                    secret_server_addr = addr;
-                }
-                if let Some(loc) = custom.get::<String>("env_file_location") {
-                    env_file_location = loc;
-                }
-            }
-        }
-    }
-
-    let specific_config = AppSpecificConfig {
-        interval_seconds: env_v2.interval_seconds,
-        monitor_path: env_v2.monitor_path.to_string(),
-        project_path: env_v2.project_path.to_string(),
-        changes_needed: env_v2.changes_needed,
-        ignored_subdirs: env_v2.ignored_subdirs.iter().map(|s| s.to_string()).collect(),
-        install_command: env_v2.install_command.as_ref().map(|s| s.to_string()),
-        build_command: env_v2.build_command.as_ref().map(|s| s.to_string()),
-        run_command: env_v2.run_command.to_string(),
-        secret_server_addr,
-        env_file_location,
-    };
-
-    Some((app_config, specific_config))
-}
-
-/// Load the base [`AppConfig`] and populate fields derived from Cargo
-/// environment variables, checking `runtime.toml` first.
-pub fn get_config() -> AppConfig {
-    if let Some((app_config, _)) = load_runtime_v2() {
-        log!(LogLevel::Info, "Loaded base configuration from Environment V2 (runtime.toml)");
-        return app_config;
-    }
-
-    let mut config: AppConfig = match AppConfig::new() {
-        Ok(loaded_data) => loaded_data,
+/// Reads the runtime bundle's unpacked fixed config (`runtime.toml`,
+/// written by watchdog into this app's config directory -- our cwd is
+/// already set there by whatever spawned us) into `Enviornment_V2`.
+///
+/// Replaces the old two-file `AppConfig` (from `Overrides.toml`) /
+/// `AppSpecificConfig` (from `Config.toml`'s `[app_specific]`) load: both
+/// are now projections of this one struct (see `get_config`/
+/// `specific_config` below) instead of two independently-loaded files, and
+/// there's no encryption step here -- watchdog already decrypted the bundle
+/// before writing this file out.
+fn load_runtime_config() -> Enviornment_V2 {
+    let content = match std::fs::read_to_string("runtime.toml") {
+        Ok(content) => content,
         Err(e) => {
-            log!(LogLevel::Error, "Couldn't load config: {}", e.to_string());
+            log!(LogLevel::Error, "Couldn't read runtime.toml: {}", e);
             std::process::exit(100)
         }
     };
-    config.app_name = Stringy::from(env!("CARGO_PKG_NAME").to_string());
-    config.database = None;
-    config
+    match toml::from_str(&content) {
+        Ok(config) => config,
+        Err(e) => {
+            log!(LogLevel::Error, "Couldn't parse runtime.toml: {}", e);
+            std::process::exit(100)
+        }
+    }
+}
+
+/// Load the base [`AppConfig`] view of the runtime config, with fields
+/// derived from Cargo environment variables applied the same way the old
+/// `Overrides.toml`-backed loader did.
+pub fn get_config() -> AppConfig {
+    let fixed = load_runtime_config();
+    AppConfig {
+        app_name: Stringy::from(env!("CARGO_PKG_NAME").to_string()),
+        max_ram_usage: fixed.max_ram_usage,
+        max_cpu_usage: fixed.max_cpu_usage,
+        environment: fixed.environment.to_string(),
+        debug_mode: fixed.debug_mode,
+        log_level: fixed.log_level,
+        git: fixed.git,
+        // Never meaningfully used by this runner; matches the old loader's
+        // own `config.database = None;` override.
+        database: None,
+        aggregator: fixed.aggregator,
+    }
 }
 
 /// Load the previous [`AppState`] from disk if present, otherwise create a new
@@ -139,16 +94,6 @@ pub async fn generate_application_state(state_path: &PathType, config: &AppConfi
             set_log_level(loaded_data.config.log_level);
             loaded_data.error_log.clear();
             update_state(&mut loaded_data, &state_path, None).await;
-
-            {
-                // creating query
-                let query: SecretQuery = SecretQuery::new(
-                    config.app_name.to_string().replace("ais_", ""),
-                    config.environment.clone(),
-                    None,
-                );
-                _ = GLOBAL_SECRET_QUERY.set(query);
-            }
 
             loaded_data
         }
@@ -189,39 +134,35 @@ pub async fn generate_application_state(state_path: &PathType, config: &AppConfi
             state.error_log.clear();
             update_state(&mut state, &state_path, None).await;
 
-            {
-                // creating query
-                let query: SecretQuery = SecretQuery::new(
-                    config.app_name.to_string().replace("ais_", ""),
-                    config.environment.clone(),
-                    None,
-                );
-                _ = GLOBAL_SECRET_QUERY.set(query);
-            }
-
             state
         }
     }
 }
 
-/// Read additional application specific configuration, checking `runtime.toml`/`custom.json`
-/// first before falling back to `Config.toml`.
-pub fn specific_config() -> Result<AppSpecificConfig, ConfigError> {
-    if let Some((_, specific_config)) = load_runtime_v2() {
-        log!(LogLevel::Info, "Loaded app-specific configuration from Environment V2 (runtime.toml)");
-        return Ok(specific_config);
-    }
-
-    let mut builder = Config::builder();
-    builder = builder.add_source(File::with_name("Config").required(false));
-
-    let settings = builder.build()?;
-    let app_specific: AppSpecificConfig = settings.get("app_specific")?;
-
-    Ok(app_specific)
+/// Read the `[app_specific]`-shaped view of the runtime config, plus the
+/// execution uid/gid/PATH-modifier fields `apply_environment_to_command`
+/// needs -- folded in here (rather than a third projection type) so
+/// `create_child` and friends don't need a second config parameter.
+pub fn specific_config() -> Result<AppSpecificConfig, String> {
+    let fixed = load_runtime_config();
+    Ok(AppSpecificConfig {
+        interval_seconds: fixed.interval_seconds,
+        monitor_path: fixed.monitor_path.to_string(),
+        project_path: fixed.project_path.to_string(),
+        changes_needed: fixed.changes_needed,
+        ignored_subdirs: fixed.ignored_subdirs.iter().map(|s| s.to_string()).collect(),
+        install_command: fixed.install_command.map(|s| s.to_string()),
+        build_command: fixed.build_command.map(|s| s.to_string()),
+        run_command: fixed.run_command.to_string(),
+        execution_uid: fixed.execution_uid,
+        execution_gid: fixed.execution_gid,
+        path_modifier: fixed.path_modifier.map(|s| s.to_string()),
+    })
 }
 
-/// Configuration section located under `[app_specific]` in `Config.toml`.
+/// Runner execution settings, projected from `Enviornment_V2` (see
+/// `specific_config`) -- no longer read from `Config.toml`'s `[app_specific]`
+/// table directly.
 #[derive(Debug, Deserialize, Clone)]
 pub struct AppSpecificConfig {
     pub interval_seconds: u32,
@@ -234,10 +175,12 @@ pub struct AppSpecificConfig {
     #[serde(default)]
     pub build_command: Option<String>,
     pub run_command: String,
-    #[serde(default = "default_secret_server")]
-    pub secret_server_addr: String,
-    #[serde(default = "default_env_location")]
-    pub env_file_location: String,
+    #[serde(default)]
+    pub execution_uid: Option<u16>,
+    #[serde(default)]
+    pub execution_gid: Option<u16>,
+    #[serde(default)]
+    pub path_modifier: Option<String>,
 }
 
 #[allow(dead_code)]
@@ -338,6 +281,3 @@ impl fmt::Display for AppSpecificConfig {
         )
     }
 }
-
-pub fn default_secret_server() -> String { String::from("localhost:50051") }
-pub fn default_env_location() -> String { String::from("/tmp/.trash") }

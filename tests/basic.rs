@@ -19,8 +19,9 @@ static SETTINGS: Lazy<AppSpecificConfig> = Lazy::new(|| AppSpecificConfig {
     install_command: None,
     build_command: None,
     run_command: "sh -c 'echo hello'".to_string(),
-    secret_server_addr: "localhost:50052".to_string(),
-    env_file_location: "/tmp/.trash".to_string(),
+    execution_uid: None,
+    execution_gid: None,
+    path_modifier: None,
 });
 
 static CONFIG: Lazy<AppConfig> = Lazy::new(|| AppConfig::dummy());
