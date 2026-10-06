@@ -79,7 +79,7 @@ pub fn promote(root: &Path, release: &Path) -> io::Result<()> {
     }
     symlink(&release, &temp_link)?;
 
-    if current.exists() || current.is_symlink() {
+    if current.exists() {
         fs::remove_file(&current)?;
     }
     fs::rename(&temp_link, &current)?;
@@ -117,11 +117,7 @@ pub fn gc(root: &Path, keep: usize) -> io::Result<()> {
 
 fn current_release_target(releases: &Path) -> Option<PathBuf> {
     let current = releases.parent()?.join("current");
-    if current.is_symlink() {
-        fs::read_link(&current).ok().and_then(|link| link.parent().map(Path::to_path_buf))
-    } else {
-        None
-    }
+    fs::read_link(&current).ok()
 }
 
 /// Returns `true` if `src` has no `.git` or its directory was unlinked.
