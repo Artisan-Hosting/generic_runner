@@ -4,3 +4,4 @@ pub mod diagnostics;
 pub mod global_child;
 pub mod signals;
 pub (crate) mod secrets;
+pub mod workspace;
