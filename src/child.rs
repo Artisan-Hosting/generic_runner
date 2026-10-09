@@ -77,7 +77,8 @@ pub async fn create_child(
     log!(LogLevel::Trace, "Creating child process...");
 
     let project_dir = settings.project_path();
-    let mut command: Command = match command_for(&settings.run_command, &project_dir.to_string(), &app_env()) {
+    let shell_flag = settings.shell_commands();
+    let mut command: Command = match command_for_mode(CommandKind::Run, &settings.run_command, &project_dir.to_string(), &app_env(), shell_flag) {
         Some(command) => command,
         None => {
             let error_item = ErrorArrayItem::new(Errors::InputOutput, "run_command is empty".to_owned());
@@ -155,7 +156,8 @@ pub async fn run_one_shot_process(
         }
     };
 
-    let mut command = match command_for(build_cmd, &settings.project_path().to_string(), &app_env()) {
+    let shell_flag = settings.shell_commands();
+    let mut command = match command_for_mode(CommandKind::Build, build_cmd, &settings.project_path().to_string(), &app_env(), shell_flag) {
         Some(command) => command,
         None => {
             log!(LogLevel::Warn, "Exting build pre-maturly");
@@ -223,7 +225,8 @@ pub async fn run_install_process(
         }
     };
 
-    let mut command = match command_for(install_cmd, &settings.project_path().to_string(), &app_env()) {
+    let shell_flag = settings.shell_commands();
+    let mut command = match command_for_mode(CommandKind::Install, install_cmd, &settings.project_path().to_string(), &app_env(), shell_flag) {
         Some(command) => command,
         None => return Ok(()),
     };
@@ -310,5 +313,67 @@ mod tests {
         ];
         let env = secrets_to_env(&secrets);
         assert_eq!(env, vec![("API_KEY".to_owned(), "abc".to_owned()), ("EMPTY".to_owned(), String::new())]);
+    }
+}
+
+impl AppSpecificConfig {
+    /// Whether `shell_commands = true` is set in the customer's Config.toml.
+    pub fn shell_commands(&self) -> bool {
+        // The flag lives only in Config.toml (not on the struct), so read it directly.
+        let path = std::path::Path::new("Config");
+        if !path.exists() {
+            return false;
+        }
+        let content = match std::fs::read_to_string(path) {
+            Ok(c) => c,
+            Err(_) => return false,
+        };
+        // Parse the [app_specific] table and look for shell_commands.
+        if let Ok(toml_value) = content.parse::<toml::Value>() {
+            if let Some(table) = toml_value.get("app_specific") {
+                if let Some(flag) = table.get("shell_commands").and_then(|v| v.as_bool()) {
+                    return flag;
+                }
+            }
+        }
+        false
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum CommandKind {
+    Install,
+    Build,
+    Run,
+}
+
+/// Builds a command for one of the app's shell-quoted command lines, in the
+/// app's own directory with the app's environment.
+///
+/// When `shell` is true the line is run through `/bin/sh -c` (with `exec` prepended
+/// for the run command) so that `$PORT`, `&&` and venv paths are expanded by the
+/// shell instead of being passed literally. When `shell` is false this delegates to
+/// [`command_for`], which splits the line itself and runs without a shell.
+pub fn command_for_mode(
+    kind: CommandKind,
+    line: &str,
+    cwd: &str,
+    env: &[(String, String)],
+    shell: bool,
+) -> Option<Command> {
+    if shell {
+        let script = match kind {
+            CommandKind::Run => format!("exec {line}"),
+            _ => line.to_owned(),
+        };
+        let mut command = Command::new("/bin/sh");
+        command.args(["-c", &script]);
+        command.current_dir(cwd);
+        for (key, value) in env {
+            command.env(key, value);
+        }
+        Some(command)
+    } else {
+        command_for(line, cwd, env)
     }
 }
