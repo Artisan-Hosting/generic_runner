@@ -312,3 +312,20 @@ mod tests {
         assert_eq!(env, vec![("API_KEY".to_owned(), "abc".to_owned()), ("EMPTY".to_owned(), String::new())]);
     }
 }
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum CommandKind {
+    Install,
+    Build,
+    Run,
+}
+
+pub fn command_for_mode(
+    _kind: CommandKind,
+    _line: &str,
+    _cwd: &str,
+    _env: &[(String, String)],
+    _shell: bool,
+) -> Option<Command> {
+    todo!()
+}
